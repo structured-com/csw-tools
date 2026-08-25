@@ -73,7 +73,7 @@ per-user configuration location::
 
 ## Credentials
 
-Secrets are stored through the OS's keyring andw ill never be put
+Secrets are stored through the OS's keyring and will never be put
 in `config.toml`. Using keyring's terminology, CSW credentials have these
 identifiers, in example:
 
