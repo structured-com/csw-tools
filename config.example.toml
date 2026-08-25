@@ -1,0 +1,13 @@
+[common]
+
+# Service name used for every password stored by csw-tools.
+# keyring_service_name = "csw-tools"
+
+
+[prune-agents]
+
+
+[prune-policy]
+
+
+[sync-collection-rules]

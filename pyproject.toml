@@ -1,0 +1,48 @@
+[project]
+name = "csw-tools"
+version = "0.1.0"
+description = "Automation utilities for Cisco Secure Workload"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3 :: Only",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "click>=8.4.2",
+    "keyring>=25.7.0",
+    "rich>=15.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/structured-com/csw-tools"
+Issues = "https://github.com/structured-com/csw-tools/issues"
+
+[project.scripts]
+csw-tools = "csw_tools.cli:cli"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.uv.build-backend]
+source-include = ["config.example.toml", "tests/**"]

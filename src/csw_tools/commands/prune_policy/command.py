@@ -1,0 +1,16 @@
+"""Placeholder for the prune-policy utility."""
+
+import click
+
+from csw_tools.context import AppContext, pass_app_context
+
+
+@click.command("prune-policy")
+@pass_app_context
+def command(app: AppContext) -> None:
+    """Run the prune-policy utility (not implemented yet)."""
+
+    app.error_console.print(
+        "[yellow]The 'prune-policy' command is not implemented yet.[/yellow]"
+    )
+    raise click.exceptions.Exit(1)
