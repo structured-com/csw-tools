@@ -1,4 +1,8 @@
-"""Shared safeguards for commands that require an interactive user."""
+"""Shared safeguards for commands that require an interactive user.
+
+Currently, this script does not allow interaction, as most commands will likely need to be verified by user feedback.
+So this safeguard should generally be used in most/all places.
+"""
 
 from __future__ import annotations
 
