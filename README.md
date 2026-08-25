@@ -1,6 +1,6 @@
 # csw-tools
 
-A collection of automation utilities for Cisco Secure Workload (CSW), available
+A collection of automation utilities for Cisco Secure Workload (CSW, formerly Tetration), available
 through this single package.
 
 ## Current utilities

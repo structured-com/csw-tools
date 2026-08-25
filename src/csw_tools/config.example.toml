@@ -1,17 +1,18 @@
 [common]
 
-# Base service name used for passwords stored by csw-tools in the keyring.
-# Modifying this is advanced usage and is typically not needed. The dashboard
-# name is appended automatically (for example, "csw-tools:my-company").
+## Base service name used for passwords stored by csw-tools in the keyring.
+## Modifying this is advanced usage and is typically not needed.
 # keyring_service_name = "csw-tools"
 
-# Secure Workload (formerly Tetration) dashboard to connect to for API calls.
-# Can be entered as URL (e.g. "https://my-company.tetrationcloud.com")
-# Can be entered as FQDN (e.g. "my-company.tetrationcloud.com")
-# Can be entered as name (e.g. "my-company")
+## Secure Workload (formerly Tetration) dashboard used for API calls.
+## Accepted formats:
+##   URL:  https://my-company.tetrationcloud.com
+##   FQDN: my-company.tetrationcloud.com
+##   Name: my-company
 # dashboard = ""
 
-# Set this to false only when TLS certificate verification must be bypassed.
+## Verify the dashboard TLS certificate.
+## Set to false only when certificate verification must be bypassed.
 # dashboard_verify_tls = true
 
 [prune-agents]
