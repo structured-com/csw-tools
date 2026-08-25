@@ -1,7 +1,7 @@
 [project]
 name = "csw-tools"
 version = "0.1.0"
-description = "Automation utilities for Cisco Secure Workload"
+description = "A collection of automation utilities for Cisco Secure Workload (CSW), available through this single package."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
