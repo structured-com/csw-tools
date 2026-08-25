@@ -1,22 +1,23 @@
 # csw-tools
 
 A collection of automation utilities for Cisco Secure Workload (CSW), available
-through a single command.
+through this single package.
 
 ## Current utilities
 
-The initial framework exposes these commands so their implementations can be
-developed independently:
+The command suite currently includes:
 
 | Command | Status |
 |---|---|
-| `init` | Placeholder; configuration and credential setup will be added later |
+| `init` | Creates or replaces a per-user configuration file |
+| `configure-credentials` | Inspects and replaces CSW API credentials in the OS keyring |
 | `prune-agents` | Placeholder |
 | `prune-policy` | Placeholder |
 | `sync-collection-rules` | Placeholder |
 
-Placeholder commands print a clear message and exit unsuccessfully. They do not
-call Cisco APIs, write configuration, or modify the system keyring.
+The remaining placeholder commands print a clear message and exit
+unsuccessfully. They do not call Cisco APIs, write configuration, or modify the
+system keyring.
 
 ## Installation
 
@@ -56,20 +57,38 @@ Shared options must appear before the command name:
 
 ```console
 csw-tools --config /path/to/config.toml prune-policy
-csw-tools --no-input prune-agents
+csw-tools --keyring-service-name team-csw configure-credentials
 ```
+
+Commands require interactive standard input. Help and version output remain
+available without an interactive terminal.
 
 ## Configuration
 
-Copy [`config.example.toml`](config.example.toml) to the OS-native per-user
-configuration location when you need file-based settings. By default, this is:
+Run `init` to copy the packaged
+[`config.example.toml`](src/csw_tools/config.example.toml) to the OS-native
+per-user configuration location:
+
+```console
+csw-tools init
+```
+
+By default, the destination is:
 
 - macOS: `~/Library/Application Support/csw-tools/config.toml`
 - Linux: `${XDG_CONFIG_HOME:-~/.config}/csw-tools/config.toml`
 - Windows: `%APPDATA%\csw-tools\config.toml`
 
-Use `--config PATH` to select another file. The default file is optional; a path
-given explicitly must exist and contain valid TOML.
+If the destination already exists, `init` asks before replacing it and defaults
+to keeping the existing file. Use the global `--config PATH` option to
+initialize an alternate location:
+
+```console
+csw-tools --config /path/to/config.toml init
+```
+
+For commands other than `init`, the default file is optional; a path given
+explicitly must exist and contain valid TOML.
 
 Settings are resolved in this order:
 
@@ -77,11 +96,8 @@ Settings are resolved in this order:
 2. `config.toml` value
 3. Backend default from `config_defaults.py`
 4. Interactive prompt, but only for a required value that remains unresolved
-5. An actionable error when prompting is disabled or no interactive terminal is
-   available
 
-Use `--no-input` to prevent all prompting. Environment variables are not an
-additional configuration source.
+Environment variables are not an additional configuration source.
 
 The configuration file separates shared settings from settings owned by each
 utility:
@@ -113,9 +129,18 @@ identifiers:
 
 Only the service name can be changed, using
 `[common].keyring_service_name` or the global `--keyring-service-name` option.
-The two usernames are fixed backend values. The future `csw-tools init` workflow
-will collect and store these passwords; its current placeholder performs no
-writes.
+The two usernames are fixed backend values.
+
+Inspect and replace the credential pair interactively with:
+
+```console
+csw-tools configure-credentials
+```
+
+The command reports whether each entry is configured without displaying its
+value. It collects both values through hidden, confirmed prompts before writing
+either entry. `init` manages only the configuration file and does not read or
+write the keyring.
 
 ## Project organization
 

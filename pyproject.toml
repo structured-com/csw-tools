@@ -45,4 +45,4 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.uv.build-backend]
-source-include = ["config.example.toml", "tests/**"]
+source-include = ["tests/**"]

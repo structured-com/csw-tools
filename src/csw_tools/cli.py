@@ -7,13 +7,22 @@ from pathlib import Path
 import click
 from rich.console import Console
 
+from csw_tools import config as config_module
+from csw_tools.commands.configure_credentials import (
+    command as configure_credentials_command,
+)
 from csw_tools.commands.init import command as init_command
 from csw_tools.commands.prune_agents import command as prune_agents_command
 from csw_tools.commands.prune_policy import command as prune_policy_command
 from csw_tools.commands.sync_collection_rules import (
     command as sync_collection_rules_command,
 )
-from csw_tools.config import ConfigError, load_config, resolve_setting
+from csw_tools.config import (
+    AppConfig,
+    ConfigError,
+    load_config,
+    resolve_setting,
+)
 from csw_tools.config_defaults import DEFAULT_KEYRING_SERVICE_NAME
 from csw_tools.context import AppContext
 from csw_tools.keyring_store import KeyringStore
@@ -24,16 +33,11 @@ from csw_tools.keyring_store import KeyringStore
     "--config",
     "config_path",
     type=click.Path(path_type=Path, dir_okay=False),
-    help="Read configuration from PATH instead of the per-user default.",
+    help="Use an alternate config file location, instead per-user default configuration file location (config.toml).",
 )
 @click.option(
     "--keyring-service-name",
-    help="Override the keyring service name for this invocation.",
-)
-@click.option(
-    "--no-input",
-    is_flag=True,
-    help="Fail instead of prompting for unresolved required values.",
+    help="Override the default keyring service name (of 'csw-tools')",
 )
 @click.version_option(package_name="csw-tools")
 @click.pass_context
@@ -41,12 +45,26 @@ def cli(
     ctx: click.Context,
     config_path: Path | None,
     keyring_service_name: str | None,
-    no_input: bool,
 ) -> None:
-    """Run automation utilities for Cisco Secure Workload."""
+    """A collection of automation utilities for Cisco Secure Workload (CSW)"""
 
     try:
-        config = load_config(config_path, explicit=config_path is not None)
+        selected_config_path = (
+            (
+                config_path
+                if config_path is not None
+                else config_module.default_config_path()
+            )
+            .expanduser()
+            .resolve()
+        )
+        if ctx.invoked_subcommand == "init":
+            config = AppConfig()
+        else:
+            config = load_config(
+                selected_config_path,
+                explicit=config_path is not None,
+            )
         resolved_service_name = resolve_setting(
             name="keyring service name",
             cli_value=keyring_service_name,
@@ -62,13 +80,14 @@ def cli(
     ctx.default_map = config.as_click_default_map()
     ctx.obj = AppContext(
         config=config,
+        config_path=selected_config_path,
         keyring=KeyringStore(resolved_service_name),
         console=Console(),
         error_console=Console(stderr=True),
-        allow_input=not no_input,
     )
 
 
+cli.add_command(configure_credentials_command)
 cli.add_command(init_command)
 cli.add_command(prune_agents_command)
 cli.add_command(prune_policy_command)

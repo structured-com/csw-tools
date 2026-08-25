@@ -5,17 +5,8 @@ import pytest
 from click.testing import CliRunner
 
 import csw_tools.cli as cli_module
-import csw_tools.config as config_module
+import csw_tools.interaction as interaction_module
 from csw_tools.cli import cli
-
-
-@pytest.fixture(autouse=True)
-def isolate_default_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        config_module,
-        "default_config_path",
-        lambda: tmp_path / "user-config" / "config.toml",
-    )
 
 
 def test_help_lists_all_commands_and_global_options() -> None:
@@ -24,8 +15,9 @@ def test_help_lists_all_commands_and_global_options() -> None:
     assert result.exit_code == 0
     assert "--config" in result.output
     assert "--keyring-service-name" in result.output
-    assert "--no-input" in result.output
+    assert "--no-input" not in result.output
     for command_name in (
+        "configure-credentials",
         "init",
         "prune-agents",
         "prune-policy",
@@ -43,7 +35,7 @@ def test_version_comes_from_package_metadata() -> None:
 
 @pytest.mark.parametrize(
     "command_name",
-    ["init", "prune-agents", "prune-policy", "sync-collection-rules"],
+    ["prune-agents", "prune-policy", "sync-collection-rules"],
 )
 def test_placeholder_commands_report_pending_and_fail(command_name: str) -> None:
     result = CliRunner().invoke(cli, [command_name])
@@ -52,22 +44,13 @@ def test_placeholder_commands_report_pending_and_fail(command_name: str) -> None
     assert "not implemented yet" in result.output
 
 
-def test_init_does_not_write_to_keyring(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unexpected_write(*_args: str) -> None:
-        pytest.fail("the placeholder init command must not write to keyring")
-
-    monkeypatch.setattr(cli_module.KeyringStore, "set_password", unexpected_write)
-
-    result = CliRunner().invoke(cli, ["init"])
-
-    assert result.exit_code == 1
-    assert "no changes were made" in result.output
-
-
 def test_explicit_missing_config_is_a_click_error(tmp_path: Path) -> None:
     config_path = tmp_path / "missing.toml"
 
-    result = CliRunner().invoke(cli, ["--config", str(config_path), "init"])
+    result = CliRunner().invoke(
+        cli,
+        ["--config", str(config_path), "prune-policy"],
+    )
 
     assert result.exit_code == 1
     assert "Configuration file does not exist" in result.output
@@ -77,7 +60,10 @@ def test_invalid_config_is_a_click_error(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text("[unknown]\n", encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["--config", str(config_path), "init"])
+    result = CliRunner().invoke(
+        cli,
+        ["--config", str(config_path), "prune-policy"],
+    )
 
     assert result.exit_code == 1
     assert "Unknown configuration section" in result.output
@@ -162,8 +148,58 @@ def test_keyring_service_name_precedence(
     if cli_service_name is not None:
         arguments.extend(("--keyring-service-name", cli_service_name))
 
-    arguments.append("init")
+    arguments.append("prune-policy")
     result = CliRunner().invoke(cli, arguments)
 
     assert result.exit_code == 1
     assert captured_service_names == [expected]
+
+
+@pytest.mark.parametrize(
+    "command_name",
+    [
+        "configure-credentials",
+        "init",
+        "prune-agents",
+        "prune-policy",
+        "sync-collection-rules",
+    ],
+)
+def test_commands_require_an_interactive_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    command_name: str,
+) -> None:
+    monkeypatch.setattr(
+        interaction_module,
+        "is_interactive_terminal",
+        lambda: False,
+    )
+
+    result = CliRunner().invoke(cli, [command_name])
+
+    assert result.exit_code == 1
+    assert "requires an interactive terminal" in result.output
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--help"],
+        ["--version"],
+        ["init", "--help"],
+        ["configure-credentials", "--help"],
+    ],
+)
+def test_help_and_version_work_without_an_interactive_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: list[str],
+) -> None:
+    monkeypatch.setattr(
+        interaction_module,
+        "is_interactive_terminal",
+        lambda: False,
+    )
+
+    result = CliRunner().invoke(cli, arguments)
+
+    assert result.exit_code == 0

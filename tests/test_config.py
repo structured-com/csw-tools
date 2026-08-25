@@ -84,7 +84,6 @@ def test_resolution_precedence_stops_before_prompt() -> None:
             config_value="config",
             default="default",
             required=True,
-            input_is_tty=True,
             prompt=unexpected_prompt,
         )
         == "cli"
@@ -95,7 +94,6 @@ def test_resolution_precedence_stops_before_prompt() -> None:
             config_value="config",
             default="default",
             required=True,
-            input_is_tty=True,
             prompt=unexpected_prompt,
         )
         == "config"
@@ -105,14 +103,13 @@ def test_resolution_precedence_stops_before_prompt() -> None:
             name="setting",
             default="default",
             required=True,
-            input_is_tty=True,
             prompt=unexpected_prompt,
         )
         == "default"
     )
 
 
-def test_required_value_prompts_only_when_interactive() -> None:
+def test_required_value_prompts_when_unresolved() -> None:
     prompts: list[str] = []
 
     def prompt(label: str) -> str:
@@ -122,28 +119,11 @@ def test_required_value_prompts_only_when_interactive() -> None:
     result = resolve_setting(
         name="workspace",
         required=True,
-        allow_input=True,
-        input_is_tty=True,
         prompt=prompt,
     )
 
     assert result == "interactive"
     assert prompts == ["workspace"]
-
-
-def test_required_value_fails_when_input_is_disabled() -> None:
-    with pytest.raises(ConfigError, match="--no-input"):
-        resolve_setting(name="workspace", required=True, allow_input=False)
-
-
-def test_required_value_fails_without_a_tty() -> None:
-    with pytest.raises(ConfigError, match="interactive input is unavailable"):
-        resolve_setting(
-            name="workspace",
-            required=True,
-            allow_input=True,
-            input_is_tty=False,
-        )
 
 
 def test_optional_missing_value_remains_none() -> None:

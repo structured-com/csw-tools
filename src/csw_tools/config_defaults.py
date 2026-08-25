@@ -2,12 +2,14 @@
 
 APP_NAME = "csw-tools"
 CONFIG_FILENAME = "config.toml"
+CONFIG_EXAMPLE_FILENAME = "config.example.toml"
 
 DEFAULT_KEYRING_SERVICE_NAME = "csw-tools"
 CSW_API_KEY_USERNAME = "csw:api_key"
 CSW_API_SECRET_USERNAME = "csw:api_secret"
 
 COMMAND_NAMES = (
+    "configure-credentials",
     "init",
     "prune-agents",
     "prune-policy",

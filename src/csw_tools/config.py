@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -126,8 +125,6 @@ def resolve_setting[T](
     config_value: T | None = None,
     default: T | None = None,
     required: bool = False,
-    allow_input: bool = True,
-    input_is_tty: bool | None = None,
     prompt: Callable[[str], T] | None = None,
 ) -> T | None:
     """Resolve one setting according to the csw-tools precedence policy."""
@@ -138,17 +135,6 @@ def resolve_setting[T](
 
     if not required:
         return None
-
-    if not allow_input:
-        raise ConfigError(
-            f"Missing required value '{name}'; prompting is disabled by --no-input"
-        )
-
-    is_tty = sys.stdin.isatty() if input_is_tty is None else input_is_tty
-    if not is_tty:
-        raise ConfigError(
-            f"Missing required value '{name}'; interactive input is unavailable"
-        )
 
     prompt_value = prompt if prompt is not None else click.prompt
     return cast(T, prompt_value(name))
