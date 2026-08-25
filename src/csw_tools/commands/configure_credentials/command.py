@@ -9,6 +9,7 @@ from csw_tools.config_defaults import (
     CSW_API_SECRET_USERNAME,
 )
 from csw_tools.context import AppContext, pass_app_context
+from csw_tools.dashboard_context import dashboard_command
 from csw_tools.interaction import interactive_command
 from csw_tools.keyring_store import KeyringStoreError
 
@@ -22,6 +23,7 @@ def _credential_status(value: str | None) -> str:
 @click.command("configure-credentials")
 @pass_app_context
 @interactive_command
+@dashboard_command
 def command(app: AppContext) -> None:
     """Inspect and replace the CSW API credential pair."""
 

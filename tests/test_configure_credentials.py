@@ -62,7 +62,11 @@ def test_configure_credentials_reports_status_without_values(
 
     monkeypatch.setattr(cli_module, "KeyringStore", FakeKeyringStore)
 
-    result = CliRunner().invoke(cli, ["configure-credentials"], input="\n")
+    result = CliRunner().invoke(
+        cli,
+        ["--dashboard", "my-company", "configure-credentials"],
+        input="\n",
+    )
 
     assert result.exit_code == 0
     assert f"CSW API key: {expected_key_status}" in result.output
@@ -80,7 +84,10 @@ def test_configure_credentials_collects_pair_before_writing(
 ) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[common]\nkeyring_service_name = "custom-service"\n',
+        (
+            '[common]\nkeyring_service_name = "custom-service"\n'
+            'dashboard = "my-company"\n'
+        ),
         encoding="utf-8",
     )
     writes: list[tuple[str, str]] = []
@@ -107,7 +114,7 @@ def test_configure_credentials_collects_pair_before_writing(
     )
 
     assert result.exit_code == 0
-    assert service_names == ["custom-service"]
+    assert service_names == ["custom-service:my-company"]
     assert writes == [
         (CSW_API_KEY_USERNAME, "actual-key"),
         (CSW_API_SECRET_USERNAME, "actual-secret"),
@@ -124,10 +131,8 @@ def test_configure_credentials_retries_mismatched_hidden_input(
     writes: list[tuple[str, str]] = []
 
     class FakeKeyringStore:
-        service_name = "csw-tools"
-
-        def __init__(self, _service_name: str) -> None:
-            pass
+        def __init__(self, service_name: str) -> None:
+            self.service_name = service_name
 
         def get_password(self, _username: str) -> None:
             return None
@@ -142,7 +147,7 @@ def test_configure_credentials_retries_mismatched_hidden_input(
 
     result = CliRunner().invoke(
         cli,
-        ["configure-credentials"],
+        ["--dashboard", "my-company", "configure-credentials"],
         input=user_input,
     )
 
@@ -160,17 +165,18 @@ def test_configure_credentials_wraps_read_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeKeyringStore:
-        service_name = "csw-tools"
-
-        def __init__(self, _service_name: str) -> None:
-            pass
+        def __init__(self, service_name: str) -> None:
+            self.service_name = service_name
 
         def get_password(self, _username: str) -> None:
             raise KeyringStoreError("Could not read credentials safely")
 
     monkeypatch.setattr(cli_module, "KeyringStore", FakeKeyringStore)
 
-    result = CliRunner().invoke(cli, ["configure-credentials"])
+    result = CliRunner().invoke(
+        cli,
+        ["--dashboard", "my-company", "configure-credentials"],
+    )
 
     assert result.exit_code == 1
     assert "Could not read credentials safely" in result.output
@@ -180,10 +186,8 @@ def test_configure_credentials_reports_possibly_incomplete_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeKeyringStore:
-        service_name = "csw-tools"
-
-        def __init__(self, _service_name: str) -> None:
-            pass
+        def __init__(self, service_name: str) -> None:
+            self.service_name = service_name
 
         def get_password(self, _username: str) -> None:
             return None
@@ -197,7 +201,7 @@ def test_configure_credentials_reports_possibly_incomplete_write(
 
     result = CliRunner().invoke(
         cli,
-        ["configure-credentials"],
+        ["--dashboard", "my-company", "configure-credentials"],
         input=user_input,
     )
 

@@ -7,6 +7,7 @@ from click.testing import CliRunner
 import csw_tools.cli as cli_module
 import csw_tools.interaction as interaction_module
 from csw_tools.cli import cli
+from csw_tools.context import AppContext, pass_app_context
 
 
 def test_help_lists_all_commands_and_global_options() -> None:
@@ -15,6 +16,9 @@ def test_help_lists_all_commands_and_global_options() -> None:
     assert result.exit_code == 0
     assert "--config" in result.output
     assert "--keyring-service-name" in result.output
+    assert "-d, --dashboard" in result.output
+    assert "--dashboard-verify-tls" in result.output
+    assert "--no-dashboard-verify-tls" in result.output
     assert "--no-input" not in result.output
     for command_name in (
         "configure-credentials",
@@ -38,10 +42,12 @@ def test_version_comes_from_package_metadata() -> None:
     ["prune-agents", "prune-policy", "sync-collection-rules"],
 )
 def test_placeholder_commands_report_pending_and_fail(command_name: str) -> None:
-    result = CliRunner().invoke(cli, [command_name])
+    result = CliRunner().invoke(cli, ["--dashboard", "my-company", command_name])
 
     assert result.exit_code == 1
     assert "not implemented yet" in result.output
+    assert "Dashboard" in result.output
+    assert "my-company" in result.output
 
 
 def test_explicit_missing_config_is_a_click_error(tmp_path: Path) -> None:
@@ -74,6 +80,17 @@ def test_empty_cli_keyring_service_name_is_an_error() -> None:
 
     assert result.exit_code == 1
     assert "keyring service name cannot be empty" in result.output
+
+
+def test_invalid_cli_dashboard_is_a_click_error() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["--dashboard", "other.example.com", "prune-policy"],
+    )
+
+    assert result.exit_code == 2
+    assert "Invalid value for '-d' / '--dashboard'" in result.output
+    assert "must be hosted under tetrationcloud.com" in result.output
 
 
 def test_command_configuration_becomes_click_defaults(
@@ -135,7 +152,7 @@ def test_keyring_service_name_precedence(
             captured_service_names.append(service_name)
 
     monkeypatch.setattr(cli_module, "KeyringStore", FakeKeyringStore)
-    arguments: list[str] = []
+    arguments = ["--dashboard", "my-company"]
 
     if config_service_name is not None:
         config_path = tmp_path / "config.toml"
@@ -152,7 +169,86 @@ def test_keyring_service_name_precedence(
     result = CliRunner().invoke(cli, arguments)
 
     assert result.exit_code == 1
-    assert captured_service_names == [expected]
+    assert captured_service_names == [f"{expected}:my-company"]
+
+
+def test_missing_dashboard_prompts_retries_and_prints_normalized_panel() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["prune-policy"],
+        input=("other.example.com\n  HTTPS://MY-COMPANY.TETRATIONCLOUD.COM/  \n"),
+    )
+
+    assert result.exit_code == 1
+    assert "CSW dashboard:" in result.output
+    assert "must be hosted under tetrationcloud.com" in result.output
+    assert result.output.count("╭─ Dashboard ─╮") == 1
+    assert "my-company" in result.output
+    assert "not implemented yet" in result.output
+
+
+def test_cli_dashboard_overrides_config_dashboard(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[common]\ndashboard = "from-config"\n',
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--config",
+            str(config_path),
+            "--dashboard",
+            "from-cli",
+            "prune-policy",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "from-cli" in result.output
+    assert "from-config" not in result.output
+    assert "CSW dashboard:" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("config_value", "cli_option", "expected"),
+    [
+        (None, None, True),
+        (False, None, False),
+        (False, "--dashboard-verify-tls", True),
+        (True, "--no-dashboard-verify-tls", False),
+    ],
+)
+def test_dashboard_verify_tls_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    config_value: bool | None,
+    cli_option: str | None,
+    expected: bool,
+) -> None:
+    @click.command("prune-policy")
+    @pass_app_context
+    def probe_command(app: AppContext) -> None:
+        click.echo(str(app.dashboard_verify_tls))
+
+    monkeypatch.setitem(cli.commands, "prune-policy", probe_command)
+    arguments: list[str] = []
+    if config_value is not None:
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            f"[common]\ndashboard_verify_tls = {str(config_value).lower()}\n",
+            encoding="utf-8",
+        )
+        arguments.extend(("--config", str(config_path)))
+    if cli_option is not None:
+        arguments.append(cli_option)
+    arguments.append("prune-policy")
+
+    result = CliRunner().invoke(cli, arguments)
+
+    assert result.exit_code == 0
+    assert result.output.strip() == str(expected)
 
 
 @pytest.mark.parametrize(
@@ -203,3 +299,4 @@ def test_help_and_version_work_without_an_interactive_terminal(
     result = CliRunner().invoke(cli, arguments)
 
     assert result.exit_code == 0
+    assert "CSW dashboard:" not in result.output

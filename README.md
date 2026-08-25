@@ -57,11 +57,17 @@ Shared options must appear before the command name:
 
 ```console
 csw-tools --config /path/to/config.toml prune-policy
-csw-tools --keyring-service-name team-csw configure-credentials
+csw-tools --dashboard my-company configure-credentials
+csw-tools -d my-company --no-dashboard-verify-tls prune-agents
 ```
 
 Commands require interactive standard input. Help and version output remain
 available without an interactive terminal.
+
+Every command except `init` requires a Secure Workload dashboard. Supply it
+with `-d`/`--dashboard`, configure it under `[common]`, or enter it when
+prompted. Before the selected command runs, a panel displays the normalized
+dashboard name so it is clear which organization is active.
 
 ## Configuration
 
@@ -105,6 +111,8 @@ utility:
 ```toml
 [common]
 keyring_service_name = "csw-tools"
+dashboard = "my-company"
+dashboard_verify_tls = true
 
 [prune-agents]
 
@@ -116,6 +124,21 @@ keyring_service_name = "csw-tools"
 Unknown sections and unknown keys under `[common]` are errors. Each utility will
 validate its own settings as it is implemented.
 
+The dashboard may be written in any of these equivalent forms:
+
+```toml
+dashboard = "my-company"
+# dashboard = "my-company.tetrationcloud.com"
+# dashboard = "https://my-company.tetrationcloud.com"
+```
+
+All forms normalize to the name `my-company`, the FQDN
+`my-company.tetrationcloud.com`, and the API endpoint
+`https://my-company.tetrationcloud.com`. Only hosted
+`tetrationcloud.com` dashboards and HTTPS URLs are accepted. TLS certificate
+verification defaults to enabled and can be overridden with the global
+`--dashboard-verify-tls`/`--no-dashboard-verify-tls` option.
+
 ## Credentials
 
 Secrets are stored through the operating system's keyring and must never be put
@@ -124,17 +147,19 @@ identifiers:
 
 | Service name | Username | Password |
 |---|---|---|
-| `csw-tools` | `csw:api_key` | The actual CSW API key |
-| `csw-tools` | `csw:api_secret` | The actual CSW API secret |
+| `csw-tools:my-company` | `csw:api_key` | The actual CSW API key |
+| `csw-tools:my-company` | `csw:api_secret` | The actual CSW API secret |
 
-Only the service name can be changed, using
+The base service name can be changed using
 `[common].keyring_service_name` or the global `--keyring-service-name` option.
-The two usernames are fixed backend values.
+The normalized dashboard name is always appended to that base, and the two
+usernames are fixed backend values. Credentials previously stored under an
+unsuffixed service name are not read or migrated.
 
 Inspect and replace the credential pair interactively with:
 
 ```console
-csw-tools configure-credentials
+csw-tools --dashboard my-company configure-credentials
 ```
 
 The command reports whether each entry is configured without displaying its
@@ -142,11 +167,18 @@ value. It collects both values through hidden, confirmed prompts before writing
 either entry. `init` manages only the configuration file and does not read or
 write the keyring.
 
+Commands that use the Secure Workload API create a `tetpyclient.RestClient` on
+demand. The selected endpoint and TLS setting come from the normalized
+dashboard context, while the API key and secret are read lazily from the
+dashboard-specific keyring service and passed directly in memory. No temporary
+credentials file is created.
+
 ## Project organization
 
-Shared CLI context, configuration loading, backend defaults, Rich output, and
-keyring access live in `src/csw_tools/`. Each utility has a dedicated subpackage
-under `src/csw_tools/commands/`, where contributors can add that utility's Click
+Shared CLI context, dashboard normalization, API client construction,
+configuration loading, backend defaults, Rich output, and keyring access live
+in `src/csw_tools/`. Each utility has a dedicated subpackage under
+`src/csw_tools/commands/`, where contributors can add that utility's Click
 options and business logic without expanding the root CLI module.
 
 ## Development

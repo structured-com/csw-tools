@@ -15,6 +15,8 @@ def test_missing_default_config_is_empty(
     config = load_config()
 
     assert config.common.keyring_service_name is None
+    assert config.common.dashboard is None
+    assert config.common.dashboard_verify_tls is None
     assert config.source_path is None
     assert config.for_command("prune-agents") == {}
 
@@ -32,6 +34,8 @@ def test_loads_common_and_command_configuration(tmp_path: Path) -> None:
         """
 [common]
 keyring_service_name = " team-csw-tools "
+dashboard = " HTTPS://My-Company.TetrationCloud.com/ "
+dashboard_verify_tls = false
 
 [prune-agents]
 dry_run = true
@@ -48,6 +52,11 @@ workspace = "Epic"
 
     assert config.source_path == config_path
     assert config.common.keyring_service_name == "team-csw-tools"
+    assert config.common.dashboard is not None
+    assert config.common.dashboard.name == "my-company"
+    assert config.common.dashboard.fqdn == "my-company.tetrationcloud.com"
+    assert config.common.dashboard.url == "https://my-company.tetrationcloud.com"
+    assert config.common.dashboard_verify_tls is False
     assert config.for_command("prune-agents") == {"dry_run": True}
     assert config.as_click_default_map()["prune-policy"] == {"workspace": "Epic"}
 
@@ -60,6 +69,12 @@ workspace = "Epic"
         ("[common]\nunknown = true\n", "Unknown key"),
         ("[common]\nkeyring_service_name = 42\n", "must be a string"),
         ('[common]\nkeyring_service_name = "   "\n', "cannot be empty"),
+        ("[common]\ndashboard = 42\n", "dashboard must be a string"),
+        ('[common]\ndashboard = "other.example.com"\n', "must be hosted"),
+        (
+            '[common]\ndashboard_verify_tls = "false"\n',
+            "dashboard_verify_tls must be a boolean",
+        ),
         ("[common\n", "Invalid TOML"),
     ],
 )

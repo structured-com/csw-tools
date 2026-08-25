@@ -15,6 +15,7 @@ from csw_tools.config_defaults import (
     CONFIG_FILENAME,
     CONFIG_SECTION_NAMES,
 )
+from csw_tools.dashboard import Dashboard, DashboardError, normalize_dashboard
 
 
 class ConfigError(ValueError):
@@ -26,6 +27,8 @@ class CommonConfig:
     """Configuration shared by every command."""
 
     keyring_service_name: str | None = None
+    dashboard: Dashboard | None = None
+    dashboard_verify_tls: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +95,10 @@ def load_config(path: Path | None = None, *, explicit: bool = False) -> AppConfi
             )
 
     common_values = raw_config.get("common", {})
-    unknown_common_keys = sorted(set(common_values) - {"keyring_service_name"})
+    unknown_common_keys = sorted(
+        set(common_values)
+        - {"dashboard", "dashboard_verify_tls", "keyring_service_name"}
+    )
     if unknown_common_keys:
         key_list = ", ".join(unknown_common_keys)
         raise ConfigError(f"Unknown key(s) in [common]: {key_list}")
@@ -105,6 +111,20 @@ def load_config(path: Path | None = None, *, explicit: bool = False) -> AppConfi
         if not keyring_service_name:
             raise ConfigError("[common].keyring_service_name cannot be empty")
 
+    dashboard_value = common_values.get("dashboard")
+    dashboard: Dashboard | None = None
+    if dashboard_value is not None:
+        if not isinstance(dashboard_value, str):
+            raise ConfigError("[common].dashboard must be a string")
+        try:
+            dashboard = normalize_dashboard(dashboard_value)
+        except DashboardError as exc:
+            raise ConfigError(f"Invalid [common].dashboard: {exc}") from exc
+
+    dashboard_verify_tls = common_values.get("dashboard_verify_tls")
+    if dashboard_verify_tls is not None and not isinstance(dashboard_verify_tls, bool):
+        raise ConfigError("[common].dashboard_verify_tls must be a boolean")
+
     command_defaults = {
         section_name: dict(cast(dict[str, object], raw_config.get(section_name, {})))
         for section_name in CONFIG_SECTION_NAMES
@@ -112,7 +132,11 @@ def load_config(path: Path | None = None, *, explicit: bool = False) -> AppConfi
     }
 
     return AppConfig(
-        common=CommonConfig(keyring_service_name=keyring_service_name),
+        common=CommonConfig(
+            keyring_service_name=keyring_service_name,
+            dashboard=dashboard,
+            dashboard_verify_tls=dashboard_verify_tls,
+        ),
         command_defaults=command_defaults,
         source_path=config_path,
     )

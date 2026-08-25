@@ -23,8 +23,12 @@ from csw_tools.config import (
     load_config,
     resolve_setting,
 )
-from csw_tools.config_defaults import DEFAULT_KEYRING_SERVICE_NAME
+from csw_tools.config_defaults import (
+    DEFAULT_DASHBOARD_VERIFY_TLS,
+    DEFAULT_KEYRING_SERVICE_NAME,
+)
 from csw_tools.context import AppContext
+from csw_tools.dashboard import DASHBOARD, Dashboard
 from csw_tools.keyring_store import KeyringStore
 
 
@@ -33,11 +37,25 @@ from csw_tools.keyring_store import KeyringStore
     "--config",
     "config_path",
     type=click.Path(path_type=Path, dir_okay=False),
-    help="Use an alternate config file location, instead per-user default configuration file location (config.toml).",
+    help=(
+        "Use an alternate config file location instead of the per-user "
+        "default (config.toml)."
+    ),
 )
 @click.option(
     "--keyring-service-name",
     help="Override the default keyring service name (of 'csw-tools')",
+)
+@click.option(
+    "-d",
+    "--dashboard",
+    type=DASHBOARD,
+    help="Use this Secure Workload dashboard (name, FQDN, or HTTPS URL).",
+)
+@click.option(
+    "--dashboard-verify-tls/--no-dashboard-verify-tls",
+    default=None,
+    help="Enable or disable TLS certificate verification for dashboard APIs.",
 )
 @click.version_option(package_name="csw-tools")
 @click.pass_context
@@ -45,6 +63,8 @@ def cli(
     ctx: click.Context,
     config_path: Path | None,
     keyring_service_name: str | None,
+    dashboard: Dashboard | None,
+    dashboard_verify_tls: bool | None,
 ) -> None:
     """A collection of automation utilities for Cisco Secure Workload (CSW)"""
 
@@ -74,6 +94,19 @@ def cli(
         if not resolved_service_name or not resolved_service_name.strip():
             raise ConfigError("The keyring service name cannot be empty")
         resolved_service_name = resolved_service_name.strip()
+        resolved_dashboard = resolve_setting(
+            name="CSW dashboard",
+            cli_value=dashboard,
+            config_value=config.common.dashboard,
+        )
+        resolved_dashboard_verify_tls = resolve_setting(
+            name="dashboard TLS verification",
+            cli_value=dashboard_verify_tls,
+            config_value=config.common.dashboard_verify_tls,
+            default=DEFAULT_DASHBOARD_VERIFY_TLS,
+        )
+        if resolved_dashboard_verify_tls is None:
+            raise ConfigError("Dashboard TLS verification could not be resolved")
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -81,9 +114,12 @@ def cli(
     ctx.obj = AppContext(
         config=config,
         config_path=selected_config_path,
-        keyring=KeyringStore(resolved_service_name),
+        keyring_service_name=resolved_service_name,
+        dashboard=resolved_dashboard,
+        dashboard_verify_tls=resolved_dashboard_verify_tls,
         console=Console(),
         error_console=Console(stderr=True),
+        _keyring_factory=KeyringStore,
     )
 
 
