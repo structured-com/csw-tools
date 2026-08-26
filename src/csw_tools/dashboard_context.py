@@ -7,6 +7,7 @@ from functools import wraps
 from typing import cast
 
 import click
+from rich import box
 from rich.panel import Panel
 
 from csw_tools.context import AppContext
@@ -25,7 +26,15 @@ def dashboard_command[**P, R](
             dashboard = click.prompt("CSW dashboard", type=DASHBOARD)
 
         app.activate_dashboard(dashboard)
-        app.console.print(Panel(f"Using CSW Dashboard: [bold][cyan]{dashboard.name}[/cyan][/bold]"))
+        app.console.print(
+            Panel(
+                f"Using CSW Dashboard: [bold][cyan]{dashboard.name}[/cyan][/bold]",
+                box=box.ROUNDED,
+                safe_box=False,
+                title="Dashboard",
+                width=15,
+            )
+        )
         return function(app, *args, **kwargs)
 
     return cast(Callable[P, R], prepared)

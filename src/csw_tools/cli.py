@@ -8,9 +8,14 @@ import click
 from rich.console import Console
 
 from csw_tools import config as config_module
+from csw_tools.commands.clean_stale_labels import (
+    command as clean_stale_labels_command,
+)
 from csw_tools.commands.configure_credentials import (
     command as configure_credentials_command,
 )
+from csw_tools.commands.convert_labels import command as convert_labels_command
+from csw_tools.commands.create_scopes import command as create_scopes_command
 from csw_tools.commands.init import command as init_command
 from csw_tools.commands.prune_agents import command as prune_agents_command
 from csw_tools.commands.prune_policy import command as prune_policy_command
@@ -124,6 +129,9 @@ def cli(
 
 
 cli.add_command(configure_credentials_command)
+cli.add_command(clean_stale_labels_command)
+cli.add_command(convert_labels_command)
+cli.add_command(create_scopes_command)
 cli.add_command(init_command)
 cli.add_command(prune_agents_command)
 cli.add_command(prune_policy_command)

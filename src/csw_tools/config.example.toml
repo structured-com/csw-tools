@@ -15,6 +15,16 @@
 ## Set to false only when certificate verification must be bypassed.
 # dashboard_verify_tls = true
 
+[clean-stale-labels]
+# minimum_age = 30
+# page_size = 500
+
+[convert-labels]
+# labels = ["hostname", "os"]
+# page_size = 500
+
+[create-scopes]
+
 [prune-agents]
 
 

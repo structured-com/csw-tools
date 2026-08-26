@@ -11,7 +11,10 @@ CSW_API_KEY_USERNAME = "csw:api_key"
 CSW_API_SECRET_USERNAME = "csw:api_secret"
 
 COMMAND_NAMES = (
+    "clean-stale-labels",
     "configure-credentials",
+    "convert-labels",
+    "create-scopes",
     "init",
     "prune-agents",
     "prune-policy",
@@ -20,6 +23,9 @@ COMMAND_NAMES = (
 
 CONFIG_SECTION_NAMES = (
     "common",
+    "clean-stale-labels",
+    "convert-labels",
+    "create-scopes",
     "prune-agents",
     "prune-policy",
     "sync-collection-rules",
