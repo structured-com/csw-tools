@@ -9,8 +9,11 @@ The command suite currently includes:
 
 | Command | Description |
 |---|---|
+| `clean-stale-labels` | Safely remove old static labels for workloads absent from current inventory |
 | `init` | Creates/replaces a per-user configuration file (config.toml) |
 | `configure-credentials` | (WIP) Creates/replaces API credentials in the OS keyring |
+| `convert-labels` | Persist observed inventory fields as static workload labels |
+| `create-scopes` | Create scopes in bulk from a documented CSV format |
 | `prune-agents` | (WIP) Review and remove stale agents and related objects |
 | `prune-policy` | (WIP) Easily remove/filter entries within a workspace policy |
 | `sync-collection-rules` | (WIP) Validate Collection Rules are synced with all scope/filter defined IP's |
@@ -42,7 +45,13 @@ Common options (e.g. CSW dashboard name) must appear before the command name, if
 csw-tools prune-policy
 csw-tools --dashboard my-company.tetrationcloud.com prune-agents
 csw-tools -d my-company configure-credentials
+csw-tools -d my-company convert-labels --label hostname --dry-run
+csw-tools -d my-company create-scopes scopes.csv --dry-run
+csw-tools -d my-company clean-stale-labels --minimum-age 30 --dry-run
 ```
+
+Mutating utilities default to dry-run. Use `COMMAND --help` for input formats,
+examples, automatic backup behavior, `--apply`, and `--rollback` instructions.
 
 
 ## Configuration
@@ -118,5 +127,4 @@ uv run pytest
 uv lock --check
 uv build
 ```
-
 
