@@ -164,7 +164,7 @@ existing scope with the same fully qualified name.
 The header is:
 
 ```csv
-short_name,parent,description,filter_json,policy_priority
+short_name,parent,description,query,filter_json,policy_priority
 ```
 
 | Column | Required | Description |
@@ -172,17 +172,62 @@ short_name,parent,description,filter_json,policy_priority
 | `short_name` | Yes | Local name of the new scope |
 | `parent` | Yes | Exact, case-sensitive, fully qualified parent scope name |
 | `description` | No | Scope description |
-| `filter_json` | Yes | JSON object used as the CSW `short_query` |
+| `query` | Conditional | Friendly filter expression described below |
+| `filter_json` | Conditional | Raw CSW `short_query` JSON for advanced filters |
 | `policy_priority` | No | Integer policy priority |
 
 Parent scopes must already exist or appear earlier in the CSV than their
-children. Since `filter_json` is embedded JSON, double its quote characters
-according to CSV escaping rules:
+children. Each row must provide exactly one of `query` or `filter_json`.
+
+### Friendly scope queries
+
+The `query` column supports `=`, `!=`, `EQ`, `NE`, `IN`, `CONTAINS`, `REGEX`,
+`AND`, `OR`, `NOT`, and parentheses. Operator precedence is `NOT`, then `AND`,
+then `OR`; parentheses can make the intended grouping explicit. Labels shown
+with `*` in the CSW interface are translated to their OpenAPI names, so `*Env`
+becomes `user_Env`.
+
+For example, this expression:
+
+```text
+*Env = Prod AND *App IN (App1, App2)
+```
+
+is equivalent to:
+
+```text
+(*Env = Prod AND *App = App1) OR (*Env = Prod AND *App = App2)
+```
+
+and generates this CSW `short_query`:
+
+```json
+{
+  "type": "and",
+  "filters": [
+    {"type": "eq", "field": "user_Env", "value": "Prod"},
+    {"type": "in", "field": "user_App", "values": ["App1", "App2"]}
+  ]
+}
+```
+
+Quote values containing spaces, commas, parentheses, or operator words. As
+required by CSV, embedded double quotes are doubled. The dry-run plan displays
+both the friendly input and the generated `short_query`:
 
 ```csv
-short_name,parent,description,filter_json,policy_priority
-Production,Tetration,Production workloads,"{""type"":""eq"",""field"":""user_env"",""value"":""prod""}",100
-Web,Tetration:Production,Web tier,"{""type"":""eq"",""field"":""user_tier"",""value"":""web""}",
+short_name,parent,description,query,filter_json,policy_priority
+ProductionApps,Tetration,Production applications,"*Env = Prod AND *App IN (App1, App2)",,100
+Shared,Tetration,Shared services,"*Owner = ""Shared Services""",,
+```
+
+For a CSW filter not covered by the friendly syntax, leave `query` blank and
+provide `filter_json`. Double the JSON quote characters according to CSV
+escaping rules:
+
+```csv
+short_name,parent,description,query,filter_json,policy_priority
+Legacy,Tetration,Legacy filter,,"{""type"":""eq"",""field"":""user_Env"",""value"":""Prod""}",100
 ```
 
 Preview, apply, and rollback:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -22,7 +23,229 @@ from csw_tools.dashboard_context import dashboard_command
 from csw_tools.interaction import interactive_command
 
 COMMAND_NAME = "create-scopes"
-CSV_FIELDS = {"short_name", "parent", "description", "filter_json", "policy_priority"}
+CSV_FIELDS = {
+    "short_name",
+    "parent",
+    "description",
+    "query",
+    "filter_json",
+    "policy_priority",
+}
+
+
+@dataclass(frozen=True)
+class QueryToken:
+    kind: str
+    value: str
+    position: int
+
+
+def tokenize_scope_query(expression: str) -> list[QueryToken]:
+    """Tokenize the intentionally small, user-facing scope query language."""
+
+    tokens: list[QueryToken] = []
+    position = 0
+    while position < len(expression):
+        character = expression[position]
+        if character.isspace():
+            position += 1
+            continue
+        if character in "(),=":
+            kinds = {"(": "LPAREN", ")": "RPAREN", ",": "COMMA", "=": "EQ"}
+            tokens.append(QueryToken(kinds[character], character, position))
+            position += 1
+            continue
+        if character == "!":
+            if position + 1 < len(expression) and expression[position + 1] == "=":
+                tokens.append(QueryToken("NE", "!=", position))
+                position += 2
+                continue
+            raise ValueError(
+                f"Unexpected '!' at column {position + 1}; use '!=' for inequality"
+            )
+        if character in {'"', "'"}:
+            quote = character
+            start = position
+            position += 1
+            value: list[str] = []
+            while position < len(expression):
+                character = expression[position]
+                if character == quote:
+                    position += 1
+                    break
+                if character == "\\":
+                    position += 1
+                    if position >= len(expression):
+                        raise ValueError(
+                            f"Trailing escape in quoted value at column {start + 1}"
+                        )
+                    value.append(expression[position])
+                    position += 1
+                    continue
+                value.append(character)
+                position += 1
+            else:
+                raise ValueError(
+                    f"Unterminated quoted value starting at column {start + 1}"
+                )
+            tokens.append(QueryToken("VALUE", "".join(value), start))
+            continue
+
+        start = position
+        while position < len(expression):
+            character = expression[position]
+            if character.isspace() or character in "(),=!\"'":
+                break
+            position += 1
+        if position == start:
+            raise ValueError(
+                "Unexpected character "
+                f"{expression[position]!r} at column {position + 1}"
+            )
+        tokens.append(QueryToken("WORD", expression[start:position], start))
+    tokens.append(QueryToken("EOF", "", len(expression)))
+    return tokens
+
+
+class ScopeQueryParser:
+    """Recursive-descent parser for scope expressions with boolean precedence."""
+
+    def __init__(self, expression: str) -> None:
+        self.tokens = tokenize_scope_query(expression)
+        self.index = 0
+
+    @property
+    def current(self) -> QueryToken:
+        return self.tokens[self.index]
+
+    def advance(self) -> QueryToken:
+        token = self.current
+        self.index += 1
+        return token
+
+    def is_keyword(self, keyword: str) -> bool:
+        return self.current.kind == "WORD" and self.current.value.upper() == keyword
+
+    def accept_keyword(self, keyword: str) -> bool:
+        if not self.is_keyword(keyword):
+            return False
+        self.advance()
+        return True
+
+    def expect(self, kind: str, description: str) -> QueryToken:
+        if self.current.kind != kind:
+            self.fail(f"Expected {description}")
+        return self.advance()
+
+    def fail(self, message: str) -> None:
+        token = self.current
+        raise ValueError(f"{message} at column {token.position + 1}")
+
+    def parse(self) -> dict[str, object]:
+        if self.current.kind == "EOF":
+            self.fail("Query cannot be empty")
+        result = self.parse_or()
+        if self.current.kind != "EOF":
+            self.fail(f"Unexpected token {self.current.value!r}")
+        return result
+
+    def parse_or(self) -> dict[str, object]:
+        result = self.parse_and()
+        while self.accept_keyword("OR"):
+            result = combine_filters("or", result, self.parse_and())
+        return result
+
+    def parse_and(self) -> dict[str, object]:
+        result = self.parse_not()
+        while self.accept_keyword("AND"):
+            result = combine_filters("and", result, self.parse_not())
+        return result
+
+    def parse_not(self) -> dict[str, object]:
+        if self.accept_keyword("NOT"):
+            return {"type": "not", "filter": self.parse_not()}
+        return self.parse_primary()
+
+    def parse_primary(self) -> dict[str, object]:
+        if self.current.kind == "LPAREN":
+            self.advance()
+            result = self.parse_or()
+            self.expect("RPAREN", "')'")
+            return result
+        return self.parse_condition()
+
+    def parse_condition(self) -> dict[str, object]:
+        field_token = self.expect("WORD", "a label or API field")
+        field = normalize_scope_field(field_token.value, field_token.position)
+
+        if self.current.kind in {"EQ", "NE"}:
+            operator = "eq" if self.advance().kind == "EQ" else "ne"
+            return {
+                "type": operator,
+                "field": field,
+                "value": self.parse_value(),
+            }
+        if self.accept_keyword("EQ"):
+            return {"type": "eq", "field": field, "value": self.parse_value()}
+        if self.accept_keyword("NE"):
+            return {"type": "ne", "field": field, "value": self.parse_value()}
+        if self.accept_keyword("CONTAINS"):
+            return {
+                "type": "contains",
+                "field": field,
+                "value": self.parse_value(),
+            }
+        if self.accept_keyword("REGEX"):
+            return {
+                "type": "regex",
+                "field": field,
+                "value": self.parse_value(),
+            }
+        if self.accept_keyword("IN"):
+            return {"type": "in", "field": field, "values": self.parse_values()}
+        self.fail("Expected =, !=, EQ, NE, IN, CONTAINS, or REGEX")
+
+    def parse_value(self) -> str:
+        if self.current.kind not in {"WORD", "VALUE"}:
+            self.fail("Expected a value")
+        return self.advance().value
+
+    def parse_values(self) -> list[str]:
+        self.expect("LPAREN", "'(' after IN")
+        values = [self.parse_value()]
+        while self.current.kind == "COMMA":
+            self.advance()
+            values.append(self.parse_value())
+        self.expect("RPAREN", "')' after IN values")
+        return values
+
+
+def normalize_scope_field(field: str, position: int = 0) -> str:
+    if field.startswith("*"):
+        if len(field) == 1:
+            raise ValueError(
+                f"Label name is missing after '*' at column {position + 1}"
+            )
+        return f"user_{field[1:]}"
+    return field
+
+
+def combine_filters(
+    operator: str, left: dict[str, object], right: dict[str, object]
+) -> dict[str, object]:
+    filters: list[object] = []
+    for item in (left, right):
+        if item.get("type") == operator and isinstance(item.get("filters"), list):
+            filters.extend(item["filters"])
+        else:
+            filters.append(item)
+    return {"type": operator, "filters": filters}
+
+
+def parse_scope_query(expression: str) -> dict[str, object]:
+    """Translate a friendly scope expression into a CSW short_query object."""
+
+    return ScopeQueryParser(expression).parse()
 
 
 def read_scope_csv(path: Path) -> list[dict[str, object]]:
@@ -30,7 +253,7 @@ def read_scope_csv(path: Path) -> list[dict[str, object]]:
         with path.open(encoding="utf-8-sig", newline="") as source:
             reader = csv.DictReader(source)
             fields = set(reader.fieldnames or ())
-            missing = {"short_name", "parent", "filter_json"} - fields
+            missing = {"short_name", "parent"} - fields
             unknown = fields - CSV_FIELDS
             if missing:
                 raise ValueError(
@@ -40,6 +263,8 @@ def read_scope_csv(path: Path) -> list[dict[str, object]]:
                 raise ValueError(
                     f"CSV has unknown column(s): {', '.join(sorted(unknown))}"
                 )
+            if not {"query", "filter_json"} & fields:
+                raise ValueError("CSV must include a query or filter_json column")
             rows: list[dict[str, object]] = []
             for number, row in enumerate(reader, start=2):
                 short_name = (row.get("short_name") or "").strip()
@@ -48,15 +273,35 @@ def read_scope_csv(path: Path) -> list[dict[str, object]]:
                     raise ValueError(
                         f"CSV row {number}: short_name and parent are required"
                     )
-                try:
-                    short_query = json.loads(row.get("filter_json") or "")
-                except json.JSONDecodeError as exc:
+                query = (row.get("query") or "").strip()
+                filter_json = (row.get("filter_json") or "").strip()
+                if query and filter_json:
                     raise ValueError(
-                        f"CSV row {number}: filter_json is invalid JSON"
-                    ) from exc
-                if not isinstance(short_query, dict):
+                        f"CSV row {number}: use query or filter_json, not both"
+                    )
+                if query:
+                    try:
+                        short_query = parse_scope_query(query)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"CSV row {number}: invalid query: {exc}"
+                        ) from exc
+                    filter_input = query
+                elif filter_json:
+                    try:
+                        short_query = json.loads(filter_json)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"CSV row {number}: filter_json is invalid JSON"
+                        ) from exc
+                    if not isinstance(short_query, dict):
+                        raise ValueError(
+                            f"CSV row {number}: filter_json must be a JSON object"
+                        )
+                    filter_input = "filter_json"
+                else:
                     raise ValueError(
-                        f"CSV row {number}: filter_json must be a JSON object"
+                        f"CSV row {number}: query or filter_json is required"
                     )
                 operation: dict[str, object] = {
                     "short_name": short_name,
@@ -64,6 +309,7 @@ def read_scope_csv(path: Path) -> list[dict[str, object]]:
                     "name": f"{parent}:{short_name}",
                     "description": (row.get("description") or "").strip(),
                     "short_query": short_query,
+                    "filter_input": filter_input,
                 }
                 priority = (row.get("policy_priority") or "").strip()
                 if priority:
@@ -166,18 +412,33 @@ def command(
 
     \b
     CSV syntax (UTF-8, one scope per row):
-      short_name,parent,description,filter_json,policy_priority
+      short_name,parent,description,query,filter_json,policy_priority
 
     short_name is the new scope's local name. parent is the exact, case-sensitive,
     fully qualified parent scope name. description and policy_priority are optional.
-    filter_json is a quoted JSON object containing the CSW short_query. Double each
-    embedded quote according to CSV syntax. Parent rows must precede their children.
+    Supply exactly one filter per row: query is the friendly form; filter_json is a
+    quoted CSW short_query object for advanced use. Parent rows must precede children.
+
+    Friendly query syntax supports =, !=, EQ, NE, IN, CONTAINS, REGEX, AND, OR,
+    NOT, and parentheses. Precedence is NOT, then AND, then OR. A UI label such as
+    *Env becomes the API field user_Env. Quote values that contain spaces, commas,
+    parentheses, or operator words. In CSV, double embedded double quotes.
 
     \b
-    Example:
-      short_name,parent,description,filter_json,policy_priority
-      Prod,Tetration,,"{""type"":""eq"",""field"":""user_env"",""value"":""p""}",100
-      Web,Tetration:Prod,,"{""type"":""eq"",""field"":""user_tier"",""value"":""w""}",
+    Friendly query examples:
+      *Env = Prod
+      *Env = Prod AND *App IN (App1, App2)
+      (*Env = Prod AND *App = App1) OR (*Env = Test AND *App = App2)
+      NOT (*Lifecycle = Retired OR *Owner = "Shared Services")
+
+    \b
+    CSV example:
+      short_name,parent,description,query,filter_json,policy_priority
+      ProdApps,Tetration,Production apps,"*Env = Prod AND *App IN (App1, App2)",,100
+      Shared,Tetration,Shared services,*Owner = 'Shared Services',,
+
+    Legacy filter_json remains supported when query is blank. Because it is embedded
+    JSON, quote the CSV field and double each JSON quote per normal CSV escaping.
 
     Existing fully qualified scope names are skipped. The default is --dry-run.
     --apply creates a timestamped JSON backup before the first scope. The backup is
@@ -201,11 +462,20 @@ def command(
 
         existing = api.get_scopes()
         operations = validate_scope_plan(read_scope_csv(csv_file), existing)
-        table = Table("Scope", "Parent", "Result", title="Scope creation plan")
+        table = Table(
+            "Scope",
+            "Parent",
+            "Input",
+            "Generated short_query",
+            "Result",
+            title="Scope creation plan",
+        )
         for operation in operations:
             table.add_row(
                 str(operation["name"]),
                 str(operation["parent"]),
+                str(operation["filter_input"]),
+                json.dumps(operation["short_query"], separators=(",", ":")),
                 str(operation.get("skip", "create")),
             )
         app.console.print(table)

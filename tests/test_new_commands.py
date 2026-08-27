@@ -19,6 +19,7 @@ from csw_tools.commands.convert_labels.command import (
     rollback_changes,
 )
 from csw_tools.commands.create_scopes.command import (
+    parse_scope_query,
     read_scope_csv,
     rollback_scopes,
     validate_scope_plan,
@@ -43,8 +44,10 @@ def test_create_scopes_help_documents_csv_syntax() -> None:
     result = CliRunner().invoke(cli, ["create-scopes", "--help"])
 
     assert result.exit_code == 0
-    assert "short_name,parent,description,filter_json,policy_priority" in result.output
+    assert "short_name,parent,description,query,filter_json" in result.output
     assert "fully qualified parent" in result.output
+    assert "*Env = Prod AND *App IN (App1, App2)" in result.output
+    assert "NOT, then AND, then OR" in result.output
 
 
 def test_clean_stale_labels_help_documents_default_threshold() -> None:
@@ -159,6 +162,90 @@ def test_read_scope_csv_and_validate_parent_order(tmp_path: Path) -> None:
 
     assert operations[0]["policy_priority"] == 100
     assert operations[1]["name"] == "Tetration:Prod:Web"
+
+
+def test_parse_scope_query_supports_compound_conditions() -> None:
+    assert parse_scope_query("*Env = Prod AND *App IN (App1, App2)") == {
+        "type": "and",
+        "filters": [
+            {"type": "eq", "field": "user_Env", "value": "Prod"},
+            {
+                "type": "in",
+                "field": "user_App",
+                "values": ["App1", "App2"],
+            },
+        ],
+    }
+
+
+def test_scope_query_parentheses_override_boolean_precedence() -> None:
+    assert parse_scope_query("(*Env = Prod OR *Env = Test) AND NOT *App = Retired") == {
+        "type": "and",
+        "filters": [
+            {
+                "type": "or",
+                "filters": [
+                    {"type": "eq", "field": "user_Env", "value": "Prod"},
+                    {"type": "eq", "field": "user_Env", "value": "Test"},
+                ],
+            },
+            {
+                "type": "not",
+                "filter": {
+                    "type": "eq",
+                    "field": "user_App",
+                    "value": "Retired",
+                },
+            },
+        ],
+    }
+
+
+def test_read_scope_csv_accepts_friendly_query_and_quoted_values(
+    tmp_path: Path,
+) -> None:
+    csv_file = tmp_path / "scopes.csv"
+    csv_file.write_text(
+        "short_name,parent,description,query,filter_json,policy_priority\n"
+        'Shared,Tetration,,"*Owner = ""Shared Services""",,\n',
+        encoding="utf-8",
+    )
+
+    [operation] = read_scope_csv(csv_file)
+
+    assert operation["short_query"] == {
+        "type": "eq",
+        "field": "user_Owner",
+        "value": "Shared Services",
+    }
+    assert operation["filter_input"] == '*Owner = "Shared Services"'
+
+
+@pytest.mark.parametrize(
+    ("query", "message"),
+    [
+        ("", "Query cannot be empty"),
+        ("*Env =", "Expected a value"),
+        ("*Env IN ()", "Expected a value"),
+        ("(*Env = Prod", "Expected '\\)'"),
+        ("*Env ~~ Prod", "Expected ="),
+    ],
+)
+def test_scope_query_reports_invalid_syntax(query: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        parse_scope_query(query)
+
+
+def test_scope_csv_requires_exactly_one_filter_format(tmp_path: Path) -> None:
+    csv_file = tmp_path / "scopes.csv"
+    csv_file.write_text(
+        "short_name,parent,query,filter_json\n"
+        'Prod,Tetration,*Env = Prod,"{""type"":""eq""}"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="query or filter_json, not both"):
+        read_scope_csv(csv_file)
 
 
 def test_scope_csv_rejects_child_before_parent(tmp_path: Path) -> None:
