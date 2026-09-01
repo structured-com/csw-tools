@@ -303,15 +303,15 @@ def read_scope_csv(path: Path) -> list[dict[str, object]]:
                         filter_input = query
                     elif filter_json:
                         short_query = json.loads(filter_json)
-                        if short_query is not None and not isinstance(
-                            short_query, dict
-                        ):
+                        if short_query is None:
+                            short_query = {}
+                        elif not isinstance(short_query, dict):
                             raise ValueError(
                                 "filter_json must be a JSON object or null"
                             )
                         filter_input = "filter_json"
                     else:
-                        short_query = None
+                        short_query = {}
                         filter_input = "(none)"
                     operation["short_query"] = short_query
                     operation["filter_input"] = filter_input
@@ -443,7 +443,9 @@ def apply_scope_operations(
             payload: dict[str, object] = {
                 "short_name": operation["short_name"],
                 "description": operation["description"],
-                "short_query": operation["short_query"],
+                # CSW rejects JSON null for short_query. Keep this normalization
+                # for plans/backups created by older versions of the command.
+                "short_query": operation["short_query"] or {},
                 "parent_app_scope_id": parent_id,
             }
             if "policy_priority" in operation:
@@ -536,7 +538,8 @@ def command(
     fully qualified parent scope name. description and policy_priority are optional.
     query is the friendly form; filter_json is a quoted CSW short_query object for
     advanced use. Supply at most one. If both are blank or omitted, the scope is
-    created with short_query set to null. Parent rows must precede their children.
+    created with an empty short_query object ({}). Parent rows must precede their
+    children.
 
     Friendly query syntax supports =, !=, EQ, NE, IN, CONTAINS, REGEX, AND, OR,
     NOT, and parentheses. Precedence is NOT, then AND, then OR. A UI label such as

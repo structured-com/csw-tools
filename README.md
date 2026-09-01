@@ -178,8 +178,8 @@ short_name,parent,description,query,filter_json,policy_priority
 
 Parent scopes must already exist or appear earlier in the CSV than their
 children. A row may provide `query` or `filter_json`, but not both. When both
-fields are blank or omitted, the command sends `short_query: null` so a scope
-with no query can be created.
+fields are blank or omitted, the command sends an empty `short_query` object
+(`{}`) so a scope with no query can be created without sending JSON `null`.
 
 ### Friendly scope queries
 
