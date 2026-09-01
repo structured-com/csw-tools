@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,12 +20,21 @@ from csw_tools.commands.convert_labels.command import (
     rollback_changes,
 )
 from csw_tools.commands.create_scopes.command import (
+    apply_scope_operations,
+    display_scope_name,
+    operation_error,
     parse_scope_query,
+    plan_counts,
     read_scope_csv,
+    result_counts,
     rollback_scopes,
+    scope_error_log_path,
     validate_scope_plan,
+    write_scope_error_log,
 )
 from csw_tools.dashboard import normalize_dashboard
+
+create_scopes_module = import_module("csw_tools.commands.create_scopes.command")
 
 
 @pytest.mark.parametrize(
@@ -48,6 +58,9 @@ def test_create_scopes_help_documents_csv_syntax() -> None:
     assert "fully qualified parent" in result.output
     assert "*Env = Prod AND *App IN (App1, App2)" in result.output
     assert "NOT, then AND, then OR" in result.output
+    assert "short_query set to null" in result.output
+    assert "line number" in result.output
+    assert "failed" in result.output
 
 
 def test_clean_stale_labels_help_documents_default_threshold() -> None:
@@ -221,6 +234,42 @@ def test_read_scope_csv_accepts_friendly_query_and_quoted_values(
     assert operation["filter_input"] == '*Owner = "Shared Services"'
 
 
+def test_read_scope_csv_accepts_blank_query_as_none(tmp_path: Path) -> None:
+    csv_file = tmp_path / "scopes.csv"
+    csv_file.write_text(
+        "short_name,parent,description,query,filter_json,policy_priority\n"
+        "Empty,Tetration,No filter,,,\n",
+        encoding="utf-8",
+    )
+
+    [operation] = read_scope_csv(csv_file)
+
+    assert operation["short_query"] is None
+    assert operation["filter_input"] == "(none)"
+    assert operation["line_number"] == 2
+
+
+def test_read_scope_csv_continues_after_row_error(tmp_path: Path) -> None:
+    csv_file = tmp_path / "scopes.csv"
+    csv_file.write_text(
+        "short_name,parent,query\n"
+        "Broken,Tetration,*Env =\n"
+        "Good,Tetration,*Env = Prod\n",
+        encoding="utf-8",
+    )
+
+    operations = read_scope_csv(csv_file)
+
+    assert operations[0]["line_number"] == 2
+    assert "Expected a value" in str(operations[0]["error"])
+    assert operations[1]["line_number"] == 3
+    assert operations[1]["short_query"] == {
+        "type": "eq",
+        "field": "user_Env",
+        "value": "Prod",
+    }
+
+
 @pytest.mark.parametrize(
     ("query", "message"),
     [
@@ -236,7 +285,7 @@ def test_scope_query_reports_invalid_syntax(query: str, message: str) -> None:
         parse_scope_query(query)
 
 
-def test_scope_csv_requires_exactly_one_filter_format(tmp_path: Path) -> None:
+def test_scope_csv_rejects_both_filter_formats_without_stopping(tmp_path: Path) -> None:
     csv_file = tmp_path / "scopes.csv"
     csv_file.write_text(
         "short_name,parent,query,filter_json\n"
@@ -244,8 +293,10 @@ def test_scope_csv_requires_exactly_one_filter_format(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="query or filter_json, not both"):
-        read_scope_csv(csv_file)
+    [operation] = read_scope_csv(csv_file)
+
+    assert operation["error"] == "use query or filter_json, not both"
+    assert operation_error(operation).startswith("Line 2:")
 
 
 def test_scope_csv_rejects_child_before_parent(tmp_path: Path) -> None:
@@ -255,10 +306,175 @@ def test_scope_csv_rejects_child_before_parent(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="appear earlier"):
-        validate_scope_plan(
-            read_scope_csv(csv_file), [{"id": "root", "name": "Tetration"}]
-        )
+    [operation] = validate_scope_plan(
+        read_scope_csv(csv_file), [{"id": "root", "name": "Tetration"}]
+    )
+
+    assert "appear earlier" in str(operation["error"])
+    assert operation["line_number"] == 2
+
+
+def test_scope_display_keeps_tail_with_leading_ellipsis() -> None:
+    name = "Default:Internal:LongScope:LongApp:App1"
+
+    assert display_scope_name(name, width=15) == "...LongApp:App1"
+    assert display_scope_name("Default:App1", width=15) == "Default:App1"
+
+
+class PartiallyFailingScopeApi:
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, object]] = []
+
+    def create_scope(self, payload: dict[str, object]) -> dict[str, object]:
+        self.payloads.append(payload)
+        if payload["short_name"] == "Broken":
+            raise ValueError("CSW rejected the scope")
+        return {"id": f"id-{payload['short_name']}"}
+
+    def get_scopes(self) -> list[dict[str, object]]:
+        return [{"id": "root", "name": "Tetration"}]
+
+
+def test_scope_apply_continues_after_failure_and_preserves_line_numbers() -> None:
+    operations = [
+        {
+            "line_number": 2,
+            "short_name": "Broken",
+            "parent": "Tetration",
+            "name": "Tetration:Broken",
+            "description": "",
+            "short_query": None,
+            "filter_input": "(none)",
+        },
+        {
+            "line_number": 3,
+            "short_name": "Good",
+            "parent": "Tetration",
+            "name": "Tetration:Good",
+            "description": "",
+            "short_query": None,
+            "filter_input": "(none)",
+        },
+        {
+            "line_number": 4,
+            "short_name": "Existing",
+            "parent": "Tetration",
+            "name": "Tetration:Existing",
+            "description": "",
+            "short_query": None,
+            "filter_input": "(none)",
+            "skip": "scope already exists",
+        },
+    ]
+    api = PartiallyFailingScopeApi()
+    progress_updates = 0
+
+    def save_progress() -> None:
+        nonlocal progress_updates
+        progress_updates += 1
+
+    apply_scope_operations(
+        api,
+        operations,
+        [{"id": "root", "name": "Tetration"}],
+        save_progress,
+    )
+
+    assert [payload["short_name"] for payload in api.payloads] == ["Broken", "Good"]
+    assert all(payload["short_query"] is None for payload in api.payloads)
+    assert operation_error(operations[0]) == "Line 2: CSW rejected the scope"
+    assert operations[1]["created_id"] == "id-Good"
+    assert progress_updates == 4
+    assert result_counts(operations) == (1, 1, 1)
+
+
+def test_scope_counts_include_ready_failed_and_skipped() -> None:
+    operations = [{}, {"error": "bad"}, {"skip": "exists"}]
+
+    assert plan_counts(operations) == (1, 1, 1)
+    assert result_counts(operations) == (0, 1, 1)
+
+
+def test_scope_error_log_is_unique_and_includes_line_number(tmp_path: Path) -> None:
+    csv_file = tmp_path / "scopes.csv"
+    csv_file.write_text("short_name,parent\n", encoding="utf-8")
+    operations = [
+        {
+            "line_number": 7,
+            "name": "Tetration:Broken",
+            "error": "CSW rejected the scope",
+        }
+    ]
+    first = scope_error_log_path(tmp_path)
+    second = scope_error_log_path(tmp_path)
+
+    write_scope_error_log(first, csv_file, operations)
+
+    assert first != second
+    contents = first.read_text(encoding="utf-8")
+    assert "Line 7: CSW rejected the scope" in contents
+    assert "Scope: Tetration:Broken" in contents
+
+
+def test_create_scopes_command_completes_batch_and_reports_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_file = tmp_path / "scopes.csv"
+    csv_file.write_text(
+        "short_name,parent,query\nBroken,Tetration,*Env =\nGood,Tetration,\n",
+        encoding="utf-8",
+    )
+    api = PartiallyFailingScopeApi()
+    monkeypatch.setattr(create_scopes_module, "api_for", lambda _app: api)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--dashboard",
+            "test",
+            "create-scopes",
+            str(csv_file),
+            "--apply",
+            "--backup-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert [payload["short_name"] for payload in api.payloads] == ["Good"]
+    assert api.payloads[0]["short_query"] is None
+    assert "Line 2: invalid query: Expected a value" in result.output
+    assert "Summary: Created 1 | Failed 1 | Skipped 0" in result.output
+    [error_log] = tmp_path.glob("create-scopes-errors-*.log")
+    assert "Line 2: invalid query: Expected a value" in error_log.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_create_scopes_dry_run_displays_long_name_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_file = tmp_path / "scopes.csv"
+    csv_file.write_text(
+        "short_name,parent\nApp1,Default:Internal:LongScope:LongApp\n",
+        encoding="utf-8",
+    )
+    api = PartiallyFailingScopeApi()
+    monkeypatch.setattr(
+        api,
+        "get_scopes",
+        lambda: [{"id": "parent", "name": "Default:Internal:LongScope:LongApp"}],
+    )
+    monkeypatch.setattr(create_scopes_module, "api_for", lambda _app: api)
+
+    result = CliRunner().invoke(
+        cli,
+        ["--dashboard", "test", "create-scopes", str(csv_file), "--dry-run"],
+    )
+
+    assert result.exit_code == 0
+    assert "...ongScope:LongApp:App1" in result.output
+    assert "Summary: Created 0 | Failed 0 | Skipped 0 | Would create 1" in result.output
 
 
 def test_backup_rejects_other_dashboard(tmp_path: Path) -> None:

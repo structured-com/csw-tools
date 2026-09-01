@@ -172,12 +172,14 @@ short_name,parent,description,query,filter_json,policy_priority
 | `short_name` | Yes | Local name of the new scope |
 | `parent` | Yes | Exact, case-sensitive, fully qualified parent scope name |
 | `description` | No | Scope description |
-| `query` | Conditional | Friendly filter expression described below |
-| `filter_json` | Conditional | Raw CSW `short_query` JSON for advanced filters |
+| `query` | No | Friendly filter expression described below |
+| `filter_json` | No | Raw CSW `short_query` JSON for advanced filters |
 | `policy_priority` | No | Integer policy priority |
 
 Parent scopes must already exist or appear earlier in the CSV than their
-children. Each row must provide exactly one of `query` or `filter_json`.
+children. A row may provide `query` or `filter_json`, but not both. When both
+fields are blank or omitted, the command sends `short_query: null` so a scope
+with no query can be created.
 
 ### Friendly scope queries
 
@@ -219,6 +221,7 @@ both the friendly input and the generated `short_query`:
 short_name,parent,description,query,filter_json,policy_priority
 ProductionApps,Tetration,Production applications,"*Env = Prod AND *App IN (App1, App2)",,100
 Shared,Tetration,Shared services,"*Owner = ""Shared Services""",,
+Empty,Tetration,Scope with no query,,,
 ```
 
 For a CSW filter not covered by the friendly syntax, leave `query` blank and
@@ -228,6 +231,28 @@ escaping rules:
 ```csv
 short_name,parent,description,query,filter_json,policy_priority
 Legacy,Tetration,Legacy filter,,"{""type"":""eq"",""field"":""user_Env"",""value"":""Prod""}",100
+```
+
+### Batch results and error handling
+
+The command treats each CSV row independently. Invalid queries, invalid
+priorities, missing parents, and CSW API failures include the row's CSV line
+number and do not prevent later independent rows from being processed. A child
+whose parent failed is reported as its own failure because that parent is
+unavailable.
+
+When any rows fail, a uniquely named
+`create-scopes-errors-TIMESTAMP.log` file is written in `--backup-dir`
+(default: `csw-tools-backups`). It records each failed line, full scope name,
+and error. The command exits nonzero after processing the complete batch so
+automation can detect partial failure.
+
+Every run prints created, failed, and skipped totals. Dry runs also print the
+number of scopes that would be created. Long fully qualified scope names in the
+plan retain their identifying tail with a leading ellipsis, for example:
+
+```text
+...LongApp:App1
 ```
 
 Preview, apply, and rollback:

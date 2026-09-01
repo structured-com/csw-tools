@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 import click
 from rich.table import Table
@@ -23,6 +25,7 @@ from csw_tools.dashboard_context import dashboard_command
 from csw_tools.interaction import interactive_command
 
 COMMAND_NAME = "create-scopes"
+SCOPE_DISPLAY_WIDTH = 24
 CSV_FIELDS = {
     "short_name",
     "parent",
@@ -263,63 +266,71 @@ def read_scope_csv(path: Path) -> list[dict[str, object]]:
                 raise ValueError(
                     f"CSV has unknown column(s): {', '.join(sorted(unknown))}"
                 )
-            if not {"query", "filter_json"} & fields:
-                raise ValueError("CSV must include a query or filter_json column")
             rows: list[dict[str, object]] = []
-            for number, row in enumerate(reader, start=2):
+            for row in reader:
+                number = reader.line_num
                 short_name = (row.get("short_name") or "").strip()
                 parent = (row.get("parent") or "").strip()
-                if not short_name or not parent:
-                    raise ValueError(
-                        f"CSV row {number}: short_name and parent are required"
-                    )
-                query = (row.get("query") or "").strip()
-                filter_json = (row.get("filter_json") or "").strip()
-                if query and filter_json:
-                    raise ValueError(
-                        f"CSV row {number}: use query or filter_json, not both"
-                    )
-                if query:
-                    try:
-                        short_query = parse_scope_query(query)
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"CSV row {number}: invalid query: {exc}"
-                        ) from exc
-                    filter_input = query
-                elif filter_json:
-                    try:
-                        short_query = json.loads(filter_json)
-                    except json.JSONDecodeError as exc:
-                        raise ValueError(
-                            f"CSV row {number}: filter_json is invalid JSON"
-                        ) from exc
-                    if not isinstance(short_query, dict):
-                        raise ValueError(
-                            f"CSV row {number}: filter_json must be a JSON object"
-                        )
-                    filter_input = "filter_json"
-                else:
-                    raise ValueError(
-                        f"CSV row {number}: query or filter_json is required"
-                    )
+                if None not in row and not any(
+                    str(value or "").strip() for value in row.values()
+                ):
+                    continue
                 operation: dict[str, object] = {
+                    "line_number": number,
                     "short_name": short_name,
                     "parent": parent,
-                    "name": f"{parent}:{short_name}",
+                    "name": (
+                        f"{parent}:{short_name}"
+                        if parent and short_name
+                        else short_name or parent or "<unknown>"
+                    ),
                     "description": (row.get("description") or "").strip(),
-                    "short_query": short_query,
-                    "filter_input": filter_input,
                 }
-                priority = (row.get("policy_priority") or "").strip()
-                if priority:
-                    try:
-                        operation["policy_priority"] = int(priority)
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"CSV row {number}: policy_priority must be an integer"
-                        ) from exc
+                try:
+                    if None in row:
+                        raise ValueError("row has more values than the CSV header")
+                    if not short_name or not parent:
+                        raise ValueError("short_name and parent are required")
+                    query = (row.get("query") or "").strip()
+                    filter_json = (row.get("filter_json") or "").strip()
+                    if query and filter_json:
+                        raise ValueError("use query or filter_json, not both")
+                    if query:
+                        try:
+                            short_query = parse_scope_query(query)
+                        except ValueError as exc:
+                            raise ValueError(f"invalid query: {exc}") from exc
+                        filter_input = query
+                    elif filter_json:
+                        short_query = json.loads(filter_json)
+                        if short_query is not None and not isinstance(
+                            short_query, dict
+                        ):
+                            raise ValueError(
+                                "filter_json must be a JSON object or null"
+                            )
+                        filter_input = "filter_json"
+                    else:
+                        short_query = None
+                        filter_input = "(none)"
+                    operation["short_query"] = short_query
+                    operation["filter_input"] = filter_input
+                    priority = (row.get("policy_priority") or "").strip()
+                    if priority:
+                        try:
+                            operation["policy_priority"] = int(priority)
+                        except ValueError as exc:
+                            raise ValueError(
+                                "policy_priority must be an integer"
+                            ) from exc
+                except json.JSONDecodeError:
+                    operation["error"] = "filter_json is invalid JSON"
+                except ValueError as exc:
+                    operation["error"] = str(exc)
                 rows.append(operation)
+    except csv.Error as exc:
+        line = reader.line_num if "reader" in locals() else "unknown"
+        raise ValueError(f"CSV line {line}: invalid CSV syntax") from exc
     except OSError as exc:
         raise ValueError(f"Could not read CSV file: {path}") from exc
     return rows
@@ -334,18 +345,125 @@ def validate_scope_plan(
     planned_names: set[str] = set()
     operations: list[dict[str, object]] = []
     for row in rows:
+        if "error" in row:
+            operations.append(row)
+            continue
         name = str(row["name"])
         parent = str(row["parent"])
         if name in known_names or name in planned_names:
             row["skip"] = "scope already exists or is duplicated"
         elif parent not in known_names and parent not in planned_names:
-            raise ValueError(
-                f"Parent scope '{parent}' must exist or appear earlier in the CSV"
+            row["error"] = (
+                f"parent scope '{parent}' must exist or appear earlier in the CSV"
             )
         else:
             planned_names.add(name)
         operations.append(row)
     return operations
+
+
+def display_scope_name(name: str, width: int = SCOPE_DISPLAY_WIDTH) -> str:
+    """Keep the identifying tail of a long fully qualified scope name."""
+
+    if len(name) <= width:
+        return name
+    return f"...{name[-(width - 3) :]}"
+
+
+def operation_error(operation: dict[str, object]) -> str:
+    line = operation.get("line_number", "?")
+    return f"Line {line}: {operation.get('error', 'unknown error')}"
+
+
+def scope_error_log_path(directory: Path) -> Path:
+    timestamped = backup_path(directory, f"{COMMAND_NAME}-errors")
+    return timestamped.with_name(f"{timestamped.stem}-{uuid4().hex}.log")
+
+
+def write_scope_error_log(
+    path: Path, csv_file: Path, operations: list[dict[str, object]]
+) -> None:
+    failures = [operation for operation in operations if "error" in operation]
+    lines = [
+        f"{COMMAND_NAME} failures",
+        f"Input: {csv_file.expanduser().resolve()}",
+        f"Failed rows: {len(failures)}",
+        "",
+    ]
+    for operation in failures:
+        name = operation.get("name", "<unknown>")
+        lines.append(f"{operation_error(operation)} | Scope: {name}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Could not write scope error log: {path}") from exc
+
+
+def plan_counts(operations: list[dict[str, object]]) -> tuple[int, int, int]:
+    ready = sum(
+        "error" not in operation and "skip" not in operation for operation in operations
+    )
+    failed = sum("error" in operation for operation in operations)
+    skipped = sum("skip" in operation for operation in operations)
+    return ready, failed, skipped
+
+
+def result_counts(operations: list[dict[str, object]]) -> tuple[int, int, int]:
+    created = sum("created_id" in operation for operation in operations)
+    failed = sum("error" in operation for operation in operations)
+    skipped = sum("skip" in operation for operation in operations)
+    return created, failed, skipped
+
+
+def apply_scope_operations(
+    api: CswApi,
+    operations: list[dict[str, object]],
+    existing: list[dict[str, object]],
+    save_progress: Callable[[], None],
+) -> None:
+    scopes_by_name = {
+        str(scope["name"]): scope
+        for scope in existing
+        if isinstance(scope.get("name"), str)
+    }
+    for operation in operations:
+        if "skip" in operation or "error" in operation:
+            continue
+        try:
+            parent = scopes_by_name.get(str(operation["parent"]))
+            if parent is None:
+                raise ValueError(
+                    f"parent scope '{operation['parent']}' is unavailable; "
+                    "it may have failed earlier in this run"
+                )
+            parent_id = parent.get("id")
+            if not isinstance(parent_id, str):
+                raise ValueError(f"parent scope '{operation['parent']}' has no ID")
+            payload: dict[str, object] = {
+                "short_name": operation["short_name"],
+                "description": operation["description"],
+                "short_query": operation["short_query"],
+                "parent_app_scope_id": parent_id,
+            }
+            if "policy_priority" in operation:
+                payload["policy_priority"] = operation["policy_priority"]
+            operation["attempted"] = True
+            save_progress()
+            created = api.create_scope(payload)
+            scope_id = created.get("id")
+            if not isinstance(scope_id, str):
+                raise ValueError(f"created scope '{operation['name']}' has no ID")
+            operation["created_id"] = scope_id
+            scopes_by_name[str(operation["name"])] = {
+                **created,
+                "id": scope_id,
+                "name": operation["name"],
+            }
+        except Exception as exc:
+            operation["error"] = command_error(exc).message
+        finally:
+            save_progress()
 
 
 def rollback_scopes(api: CswApi, backup: dict[str, object]) -> int:
@@ -382,7 +500,7 @@ def rollback_scopes(api: CswApi, backup: dict[str, object]) -> int:
     type=click.Path(path_type=Path, file_okay=False),
     default=DEFAULT_BACKUP_DIRECTORY,
     show_default=True,
-    help="Directory for the automatic JSON backup created before scope creation.",
+    help=("Directory for automatic JSON backups and uniquely named failure logs."),
 )
 @click.option(
     "--apply/--dry-run",
@@ -416,8 +534,9 @@ def command(
 
     short_name is the new scope's local name. parent is the exact, case-sensitive,
     fully qualified parent scope name. description and policy_priority are optional.
-    Supply exactly one filter per row: query is the friendly form; filter_json is a
-    quoted CSW short_query object for advanced use. Parent rows must precede children.
+    query is the friendly form; filter_json is a quoted CSW short_query object for
+    advanced use. Supply at most one. If both are blank or omitted, the scope is
+    created with short_query set to null. Parent rows must precede their children.
 
     Friendly query syntax supports =, !=, EQ, NE, IN, CONTAINS, REGEX, AND, OR,
     NOT, and parentheses. Precedence is NOT, then AND, then OR. A UI label such as
@@ -436,14 +555,20 @@ def command(
       short_name,parent,description,query,filter_json,policy_priority
       ProdApps,Tetration,Production apps,"*Env = Prod AND *App IN (App1, App2)",,100
       Shared,Tetration,Shared services,*Owner = 'Shared Services',,
+      Empty,Tetration,Scope with no query,,,
 
     Legacy filter_json remains supported when query is blank. Because it is embedded
     JSON, quote the CSV field and double each JSON quote per normal CSV escaping.
 
-    Existing fully qualified scope names are skipped. The default is --dry-run.
-    --apply creates a timestamped JSON backup before the first scope. The backup is
-    updated after each successful creation so --apply --rollback BACKUP can remove
-    only scopes created by that run, in child-first order.
+    Existing fully qualified scope names are skipped. Row validation and API errors
+    include the CSV line number; independent rows continue processing. Failures are
+    written to a unique create-scopes-errors-*.log file in --backup-dir. Every run
+    finishes with created, failed, and skipped totals. A partial failure exits
+    nonzero after processing all rows.
+
+    The default is --dry-run. --apply creates a timestamped JSON backup before the
+    first scope. The backup is updated after every attempt so --apply --rollback
+    BACKUP can remove only scopes created by that run, in child-first order.
     """
 
     try:
@@ -462,69 +587,90 @@ def command(
 
         existing = api.get_scopes()
         operations = validate_scope_plan(read_scope_csv(csv_file), existing)
-        table = Table(
+        table = Table(title="Scope creation plan", show_lines=True)
+        table.add_column("Line", justify="right", no_wrap=True)
+        table.add_column(
             "Scope",
-            "Parent",
-            "Input",
-            "Generated short_query",
-            "Result",
-            title="Scope creation plan",
+            min_width=SCOPE_DISPLAY_WIDTH,
+            max_width=SCOPE_DISPLAY_WIDTH,
+            no_wrap=True,
         )
+        table.add_column("Query", overflow="fold")
+        table.add_column("Result")
         for operation in operations:
+            if "error" in operation:
+                result = operation_error(operation)
+            else:
+                result = str(operation.get("skip", "create"))
+            if "short_query" in operation:
+                query_display = (
+                    f"{operation.get('filter_input', '(none)')}\n"
+                    f"-> {json.dumps(operation['short_query'], separators=(',', ':'))}"
+                )
+            else:
+                query_display = "-"
             table.add_row(
-                str(operation["name"]),
-                str(operation["parent"]),
-                str(operation["filter_input"]),
-                json.dumps(operation["short_query"], separators=(",", ":")),
-                str(operation.get("skip", "create")),
+                str(operation.get("line_number", "?")),
+                display_scope_name(str(operation["name"])),
+                query_display,
+                result,
             )
         app.console.print(table)
-        pending = [operation for operation in operations if "skip" not in operation]
-        if not pending:
-            app.console.print("No scopes need to be created.")
-            return
+
+        error_path = scope_error_log_path(backup_dir)
+        ready, failed, skipped = plan_counts(operations)
+        if failed:
+            write_scope_error_log(error_path, csv_file, operations)
         if not apply:
             app.console.print("[yellow]Dry run: no scopes were created.[/yellow]")
+            app.console.print(
+                f"Summary: Created 0 | Failed {failed} | Skipped {skipped} | "
+                f"Would create {ready}"
+            )
+            if failed:
+                app.console.print(f"Error log: {error_path}")
+                raise click.ClickException(
+                    f"{failed} scope row(s) failed validation; see {error_path}"
+                )
+            return
+
+        if not ready:
+            app.console.print(
+                f"Summary: Created 0 | Failed {failed} | Skipped {skipped}"
+            )
+            if failed:
+                app.console.print(f"Error log: {error_path}")
+                raise click.ClickException(
+                    f"{failed} scope row(s) failed; see {error_path}"
+                )
             return
 
         backup = new_backup(
             command=COMMAND_NAME, dashboard=app.dashboard, operations=operations
         )
         path = backup_path(backup_dir, COMMAND_NAME)
-        write_backup(path, backup)
-        scopes_by_name = {
-            str(scope["name"]): scope
-            for scope in existing
-            if isinstance(scope.get("name"), str)
-        }
-        for operation in pending:
-            parent = scopes_by_name[str(operation["parent"])]
-            parent_id = parent.get("id")
-            if not isinstance(parent_id, str):
-                raise ValueError(f"Parent scope '{operation['parent']}' has no ID")
-            payload: dict[str, object] = {
-                "short_name": operation["short_name"],
-                "description": operation["description"],
-                "short_query": operation["short_query"],
-                "parent_app_scope_id": parent_id,
-            }
-            if "policy_priority" in operation:
-                payload["policy_priority"] = operation["policy_priority"]
-            operation["attempted"] = True
+
+        def save_progress() -> None:
             write_backup(path, backup)
-            created = api.create_scope(payload)
-            scope_id = created.get("id")
-            if not isinstance(scope_id, str):
-                raise ValueError(f"Created scope '{operation['name']}' has no ID")
-            operation["created_id"] = scope_id
-            scopes_by_name[str(operation["name"])] = {
-                **created,
-                "id": scope_id,
-                "name": operation["name"],
-            }
-            write_backup(path, backup)
-        app.console.print(f"[green]Created {len(pending)} scope(s).[/green]")
+            if any("error" in operation for operation in operations):
+                write_scope_error_log(error_path, csv_file, operations)
+
+        save_progress()
+        apply_scope_operations(api, operations, existing, save_progress)
+
+        created, failed, skipped = result_counts(operations)
+        for operation in operations:
+            if "error" in operation:
+                app.console.print(f"[red]{operation_error(operation)}[/red]")
+        app.console.print(
+            f"Summary: Created {created} | Failed {failed} | Skipped {skipped}"
+        )
         app.console.print(f"Backup: {path}")
+        if failed:
+            app.console.print(f"Error log: {error_path}")
+            raise click.ClickException(
+                f"{failed} scope row(s) failed; see {error_path}"
+            )
     except click.ClickException:
         raise
     except Exception as exc:
