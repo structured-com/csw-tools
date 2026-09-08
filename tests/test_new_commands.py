@@ -58,7 +58,7 @@ def test_create_scopes_help_documents_csv_syntax() -> None:
     assert "fully qualified parent" in result.output
     assert "*Env = Prod AND *App IN (App1, App2)" in result.output
     assert "NOT, then AND, then OR" in result.output
-    assert "empty short_query object ({})" in result.output
+    assert 'no-filter short_query {"type":"none"}' in result.output
     assert "line number" in result.output
     assert "failed" in result.output
 
@@ -234,7 +234,7 @@ def test_read_scope_csv_accepts_friendly_query_and_quoted_values(
     assert operation["filter_input"] == '*Owner = "Shared Services"'
 
 
-def test_read_scope_csv_accepts_blank_query_as_empty_object(tmp_path: Path) -> None:
+def test_read_scope_csv_accepts_blank_query_as_none_filter(tmp_path: Path) -> None:
     csv_file = tmp_path / "scopes.csv"
     csv_file.write_text(
         "short_name,parent,description,query,filter_json,policy_priority\n"
@@ -244,12 +244,12 @@ def test_read_scope_csv_accepts_blank_query_as_empty_object(tmp_path: Path) -> N
 
     [operation] = read_scope_csv(csv_file)
 
-    assert operation["short_query"] == {}
+    assert operation["short_query"] == {"type": "none"}
     assert operation["filter_input"] == "(none)"
     assert operation["line_number"] == 2
 
 
-def test_read_scope_csv_normalizes_filter_json_null_to_empty_object(
+def test_read_scope_csv_normalizes_filter_json_null_to_none_filter(
     tmp_path: Path,
 ) -> None:
     csv_file = tmp_path / "scopes.csv"
@@ -260,7 +260,7 @@ def test_read_scope_csv_normalizes_filter_json_null_to_empty_object(
 
     [operation] = read_scope_csv(csv_file)
 
-    assert operation["short_query"] == {}
+    assert operation["short_query"] == {"type": "none"}
 
 
 def test_read_scope_csv_continues_after_row_error(tmp_path: Path) -> None:
@@ -395,7 +395,7 @@ def test_scope_apply_continues_after_failure_and_preserves_line_numbers() -> Non
     )
 
     assert [payload["short_name"] for payload in api.payloads] == ["Broken", "Good"]
-    assert all(payload["short_query"] == {} for payload in api.payloads)
+    assert all(payload["short_query"] == {"type": "none"} for payload in api.payloads)
     assert operation_error(operations[0]) == "Line 2: CSW rejected the scope"
     assert operations[1]["created_id"] == "id-Good"
     assert progress_updates == 4
@@ -456,7 +456,7 @@ def test_create_scopes_command_completes_batch_and_reports_summary(
 
     assert result.exit_code == 1
     assert [payload["short_name"] for payload in api.payloads] == ["Good"]
-    assert api.payloads[0]["short_query"] == {}
+    assert api.payloads[0]["short_query"] == {"type": "none"}
     assert "Line 2: invalid query: Expected a value" in result.output
     assert "Summary: Created 1 | Failed 1 | Skipped 0" in result.output
     [error_log] = tmp_path.glob("create-scopes-errors-*.log")

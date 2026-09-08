@@ -304,14 +304,14 @@ def read_scope_csv(path: Path) -> list[dict[str, object]]:
                     elif filter_json:
                         short_query = json.loads(filter_json)
                         if short_query is None:
-                            short_query = {}
+                            short_query = {"type": "none"}
                         elif not isinstance(short_query, dict):
                             raise ValueError(
                                 "filter_json must be a JSON object or null"
                             )
                         filter_input = "filter_json"
                     else:
-                        short_query = {}
+                        short_query = {"type": "none"}
                         filter_input = "(none)"
                     operation["short_query"] = short_query
                     operation["filter_input"] = filter_input
@@ -445,7 +445,7 @@ def apply_scope_operations(
                 "description": operation["description"],
                 # CSW rejects JSON null for short_query. Keep this normalization
                 # for plans/backups created by older versions of the command.
-                "short_query": operation["short_query"] or {},
+                "short_query": operation["short_query"] or {"type": "none"},
                 "parent_app_scope_id": parent_id,
             }
             if "policy_priority" in operation:
@@ -538,7 +538,7 @@ def command(
     fully qualified parent scope name. description and policy_priority are optional.
     query is the friendly form; filter_json is a quoted CSW short_query object for
     advanced use. Supply at most one. If both are blank or omitted, the scope is
-    created with an empty short_query object ({}). Parent rows must precede their
+    created with the no-filter short_query {"type":"none"}. Parent rows must precede their
     children.
 
     Friendly query syntax supports =, !=, EQ, NE, IN, CONTAINS, REGEX, AND, OR,
