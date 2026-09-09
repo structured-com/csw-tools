@@ -37,7 +37,30 @@ from csw_tools.dashboard import DASHBOARD, Dashboard
 from csw_tools.keyring_store import KeyringStore
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+class FullCommandHelpGroup(click.Group):
+    """Wrap command summaries instead of shortening them with ellipses."""
+
+    def format_commands(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        rows = []
+        for name in self.list_commands(ctx):
+            command = self.get_command(ctx, name)
+            if command is None or command.hidden:
+                continue
+            # Preserve Click's summary and deprecation handling, but allow the
+            # complete summary through to the formatter's word wrapping.
+            summary = command.get_short_help_str(limit=len(command.help or ""))
+            rows.append((name, summary))
+        if rows:
+            with formatter.section("Commands"):
+                formatter.write_dl(rows)
+
+
+@click.group(
+    cls=FullCommandHelpGroup,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 @click.option(
     "--config",
     "config_path",

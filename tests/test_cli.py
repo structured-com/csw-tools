@@ -30,6 +30,22 @@ def test_help_lists_all_commands_and_global_options() -> None:
         assert command_name in result.output
 
 
+@pytest.mark.parametrize("args", [[], ["--help"], ["-h"]])
+@pytest.mark.parametrize("terminal_width", [40, 80, 120])
+def test_command_descriptions_wrap_without_truncation(
+    args: list[str], terminal_width: int
+) -> None:
+    result = CliRunner().invoke(cli, args, terminal_width=terminal_width)
+
+    assert result.exit_code == (2 if not args else 0)
+    # Compare command text independently of wrapping, including line breaks
+    # after hyphens on narrow terminals. The Usage line's [ARGS]... is valid.
+    output = "".join(result.output.split("Commands:", 1)[1].split())
+    assert "InspectandreplacetheCSWAPIcredentialpair." in output
+    assert "Runthesync-collection-rulesutility(notimplementedyet)." in output
+    assert "..." not in output
+
+
 def test_version_comes_from_package_metadata() -> None:
     result = CliRunner().invoke(cli, ["--version"])
 
