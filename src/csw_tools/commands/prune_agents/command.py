@@ -107,7 +107,8 @@ def command(
     backup_dir: Path,
     rollback: Path | None,
 ) -> None:
-    """Review and destructively prune stale agents and explicit related objects.
+    """(DEV/TESTING) Review and destructively prune stale agents and explicit
+    related objects.
 
     DESTRUCTIVE: agent decommissioning has no true rollback. Saving agent details
     does NOT allow re-registering the agent or restoring historical telemetry.

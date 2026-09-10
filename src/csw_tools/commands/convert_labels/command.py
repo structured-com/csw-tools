@@ -135,7 +135,7 @@ def command(
     apply: bool,
     rollback: Path | None,
 ) -> None:
-    """Persist dynamic inventory fields as static workload labels.
+    """(DEV/TESTING) Persist dynamic inventory fields as static workload labels.
 
     Static labels are written against each workload IP. Existing static labels
     are preserved; only requested keys are added or updated. Scope membership is

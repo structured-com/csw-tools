@@ -48,6 +48,25 @@ def test_command_descriptions_wrap_without_truncation(
     assert "..." not in output
 
 
+def test_development_commands_are_marked_in_root_help() -> None:
+    result = CliRunner().invoke(cli, ["--help"], terminal_width=120)
+
+    assert result.exit_code == 0
+    for command_name in (
+        "clean-stale-labels",
+        "convert-labels",
+        "prune-agents",
+        "prune-policy",
+        "sync-collection-rules",
+    ):
+        command = cli.commands[command_name]
+        assert command.get_short_help_str().startswith("(DEV/TESTING)")
+
+    for command_name in ("configure-credentials", "create-scopes", "init"):
+        command = cli.commands[command_name]
+        assert not command.get_short_help_str().startswith("(DEV/TESTING)")
+
+
 def test_version_comes_from_package_metadata() -> None:
     result = CliRunner().invoke(cli, ["--version"])
     with Path("pyproject.toml").open("rb") as project_file:

@@ -182,7 +182,7 @@ def command(
     apply: bool,
     rollback: Path | None,
 ) -> None:
-    """Remove static labels for workloads absent from observation.
+    """(DEV/TESTING) Remove static labels for workloads absent from observation.
 
     This command compares scope-independent static workload label records with
     current CSW inventory. A record is eligible only when (1) no currently

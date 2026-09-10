@@ -12,7 +12,7 @@ from csw_tools.interaction import interactive_command
 @interactive_command
 @dashboard_command
 def command(app: AppContext) -> None:
-    """Run the sync-collection-rules utility (not implemented yet)."""
+    """(DEV/TESTING) Run the sync-collection-rules utility (not implemented yet)."""
 
     app.error_console.print(
         "[yellow]The 'sync-collection-rules' command is not implemented yet.[/yellow]"
