@@ -46,4 +46,4 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.uv.build-backend]
-source-include = ["tests/**"]
+source-include = ["tests/**", "DEV-GUIDELINES.md", ".python-version"]

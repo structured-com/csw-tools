@@ -538,8 +538,8 @@ def command(
     fully qualified parent scope name. description and policy_priority are optional.
     query is the friendly form; filter_json is a quoted CSW short_query object for
     advanced use. Supply at most one. If both are blank or omitted, the scope is
-    created with the no-filter short_query {"type":"none"}. Parent rows must precede their
-    children.
+    created with the no-filter short_query {"type":"none"}. Parent rows must
+    precede their children.
 
     Friendly query syntax supports =, !=, EQ, NE, IN, CONTAINS, REGEX, AND, OR,
     NOT, and parentheses. Precedence is NOT, then AND, then OR. A UI label such as

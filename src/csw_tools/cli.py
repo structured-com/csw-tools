@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import click
@@ -35,6 +36,7 @@ from csw_tools.config_defaults import (
 from csw_tools.context import AppContext
 from csw_tools.dashboard import DASHBOARD, Dashboard
 from csw_tools.keyring_store import KeyringStore
+from csw_tools.project_info import format_version_info
 
 
 class FullCommandHelpGroup(click.Group):
@@ -55,6 +57,21 @@ class FullCommandHelpGroup(click.Group):
         if rows:
             with formatter.section("Commands"):
                 formatter.write_dl(rows)
+
+
+def show_version(ctx: click.Context, _parameter: click.Parameter, value: bool) -> None:
+    """Print project and interpreter information, then exit."""
+
+    if not value or ctx.resilient_parsing:
+        return
+    try:
+        output = format_version_info()
+    except (OSError, KeyError, RuntimeError, tomllib.TOMLDecodeError) as exc:
+        raise click.ClickException(
+            f"Could not load project version information: {exc}"
+        ) from exc
+    click.echo(output)
+    ctx.exit()
 
 
 @click.group(
@@ -85,7 +102,14 @@ class FullCommandHelpGroup(click.Group):
     default=None,
     help="Enable or disable TLS certificate verification for dashboard APIs.",
 )
-@click.version_option(package_name="csw-tools")
+@click.option(
+    "--version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=show_version,
+    help="Show project and Python version information, then exit.",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,

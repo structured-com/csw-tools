@@ -1,3 +1,5 @@
+import platform
+import tomllib
 from pathlib import Path
 
 import click
@@ -48,9 +50,32 @@ def test_command_descriptions_wrap_without_truncation(
 
 def test_version_comes_from_package_metadata() -> None:
     result = CliRunner().invoke(cli, ["--version"])
+    with Path("pyproject.toml").open("rb") as project_file:
+        project = tomllib.load(project_file)["project"]
 
     assert result.exit_code == 0
-    assert "0.1.0" in result.output
+    assert result.output == (
+        f"{project['name']} {project['version']}\n"
+        f"{project['description']}\n"
+        f"Python: project {Path('.python-version').read_text().strip()} | "
+        f"required {project['requires-python']} | running {platform.python_version()}\n"
+        f"License: {project['license']}\n"
+        f"Homepage: {project['urls']['Homepage']}\n"
+    )
+
+
+def test_version_exits_before_loading_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_config_load(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("version output loaded configuration")
+
+    monkeypatch.setattr(cli_module, "load_config", unexpected_config_load)
+
+    result = CliRunner().invoke(cli, ["--version"])
+
+    assert result.exit_code == 0
+    assert "CSW dashboard:" not in result.output
 
 
 @pytest.mark.parametrize(
