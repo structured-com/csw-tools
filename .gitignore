@@ -219,3 +219,5 @@ __marimo__/
 
 # OTHER - CUSTOM
 _scratch/
+audit-git-history.sh
+sensitive-words.txt
