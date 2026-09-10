@@ -8,9 +8,14 @@ import click
 from rich.console import Console
 
 from csw_tools import config as config_module
+from csw_tools.commands.clean_stale_labels import (
+    command as clean_stale_labels_command,
+)
 from csw_tools.commands.configure_credentials import (
     command as configure_credentials_command,
 )
+from csw_tools.commands.convert_labels import command as convert_labels_command
+from csw_tools.commands.create_scopes import command as create_scopes_command
 from csw_tools.commands.init import command as init_command
 from csw_tools.commands.prune_agents import command as prune_agents_command
 from csw_tools.commands.prune_policy import command as prune_policy_command
@@ -32,7 +37,30 @@ from csw_tools.dashboard import DASHBOARD, Dashboard
 from csw_tools.keyring_store import KeyringStore
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+class FullCommandHelpGroup(click.Group):
+    """Wrap command summaries instead of shortening them with ellipses."""
+
+    def format_commands(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        rows = []
+        for name in self.list_commands(ctx):
+            command = self.get_command(ctx, name)
+            if command is None or command.hidden:
+                continue
+            # Preserve Click's summary and deprecation handling, but allow the
+            # complete summary through to the formatter's word wrapping.
+            summary = command.get_short_help_str(limit=len(command.help or ""))
+            rows.append((name, summary))
+        if rows:
+            with formatter.section("Commands"):
+                formatter.write_dl(rows)
+
+
+@click.group(
+    cls=FullCommandHelpGroup,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 @click.option(
     "--config",
     "config_path",
@@ -124,6 +152,9 @@ def cli(
 
 
 cli.add_command(configure_credentials_command)
+cli.add_command(clean_stale_labels_command)
+cli.add_command(convert_labels_command)
+cli.add_command(create_scopes_command)
 cli.add_command(init_command)
 cli.add_command(prune_agents_command)
 cli.add_command(prune_policy_command)
