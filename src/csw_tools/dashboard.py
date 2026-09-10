@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -70,6 +71,21 @@ def normalize_dashboard(value: str) -> Dashboard:
         host = candidate
 
     fqdn_suffix = f".{TETRATION_CLOUD_DOMAIN}"
+    # Bare identifiers retain their original SaaS meaning. An explicit HTTPS
+    # origin is required for on-premises, preventing accidental credential reuse.
+    if "://" in candidate and not host.endswith(fqdn_suffix):
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            if len(host) > 253 or not all(
+                _DASHBOARD_NAME_PATTERN.fullmatch(label) for label in host.split(".")
+            ):
+                raise DashboardError("Invalid on-premises dashboard hostname") from None
+            origin = host
+        else:
+            host = str(address)
+            origin = f"[{host}]" if address.version == 6 else host
+        return Dashboard(name=f"https://{origin}", fqdn=host, url=f"https://{origin}")
     if host.endswith(fqdn_suffix):
         name = host.removesuffix(fqdn_suffix)
     elif "." in host:

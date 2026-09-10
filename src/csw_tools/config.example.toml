@@ -9,6 +9,7 @@
 ##   URL:  https://my-company.tetrationcloud.com
 ##   FQDN: my-company.tetrationcloud.com
 ##   Name: my-company
+##   On-premises: https://csw.example.org (explicit HTTPS URL required)
 # dashboard = ""
 
 ## Verify the dashboard TLS certificate.
@@ -26,6 +27,11 @@
 [create-scopes]
 
 [prune-agents]
+# page_size = 500
+# backup_dir = "csw-tools-backups"
+## Defaults to dry-run with individual confirmation when --apply is supplied.
+## Agent deletion is destructive and cannot be rolled back.
+## lastdate is an optional Unix epoch cutoff in seconds; omitted = 30 days ago.
 
 
 [prune-policy]

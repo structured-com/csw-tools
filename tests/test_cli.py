@@ -55,7 +55,7 @@ def test_version_comes_from_package_metadata() -> None:
 
 @pytest.mark.parametrize(
     "command_name",
-    ["prune-agents", "prune-policy", "sync-collection-rules"],
+    ["prune-policy", "sync-collection-rules"],
 )
 def test_placeholder_commands_report_pending_and_fail(command_name: str) -> None:
     result = CliRunner().invoke(cli, ["--dashboard", "my-company", command_name])
