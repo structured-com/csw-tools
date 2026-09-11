@@ -66,20 +66,21 @@ authoritative option list:
 csw-tools COMMAND --help
 ```
 
-## Dashboard selection
+## CSW Dashboard Selection
 
-A dashboard may be supplied as its short SaaS name, full
-`tetrationcloud.com` hostname, or HTTPS URL:
+A dashboard may be supplied as its short SaaS name, a full FQDN, or an HTTPS
+origin:
 
 ```console
 csw-tools -d my-company COMMAND
 csw-tools -d my-company.tetrationcloud.com COMMAND
-csw-tools -d https://my-company.tetrationcloud.com COMMAND
+csw-tools -d mycsw.example.org COMMAND
+csw-tools -d https://mycsw.example.org COMMAND
 ```
 
-On-premises instances require an explicit HTTPS origin, such as
-`-d https://csw.example.org` or `-d https://192.0.2.10`. Paths, credentials
-embedded in URLs, and custom ports are rejected.
+A short name is auto-appended by default with `.tetrationcloud.com`. Any FQDN is used as
+given with HTTPS. IP addresses and single-label on-premises hosts require HTTPS:// explicitly, such as `-d https://192.0.2.10` or
+`-d https://csw-local`. 
 
 TLS certificate verification is enabled by default. Use
 `--no-dashboard-verify-tls` only for a trusted deployment whose certificate
@@ -109,9 +110,7 @@ per-user location:
 - Linux: `${XDG_CONFIG_HOME:-~/.config}/csw-tools/config.toml`
 - Windows: `%APPDATA%\csw-tools\config.toml`
 
-Use `--config PATH` before the command name to select a different file. If the
-target already exists, `init` asks before replacing it and defaults to keeping
-the existing file.
+If needed, use `--config PATH` before the command name to select a different file.
 
 ## Credentials
 
@@ -130,13 +129,9 @@ Inspect or replace the credential pair interactively:
 csw-tools -d my-company configure-credentials
 ```
 
-On-premises credentials use the normalized HTTPS origin as the dashboard
-suffix. Configure them using the same URL supplied to other commands.
+(If using a CSW Dashboard that is not `.tetrationcloud.com`, then the full HTTPS url is used instead as part of the service name)
 
-Use the least-privileged API key that provides the capabilities listed in the
-selected command's guide.
-
-## Safe change workflow
+## Safe Change Workflow
 
 Mutating commands default to `--dry-run`; review the complete plan before using
 `--apply`. Supported commands create a timestamped JSON backup before the first

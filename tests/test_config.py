@@ -61,6 +61,21 @@ workspace = "Epic"
     assert config.as_click_default_map()["prune-policy"] == {"workspace": "Epic"}
 
 
+def test_loads_non_saas_fqdn_from_configuration(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[common]\ndashboard = "CSW.EXAMPLE.ORG"\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path, explicit=True)
+
+    assert config.common.dashboard is not None
+    assert config.common.dashboard.name == "https://csw.example.org"
+    assert config.common.dashboard.fqdn == "csw.example.org"
+    assert config.common.dashboard.url == "https://csw.example.org"
+
+
 @pytest.mark.parametrize(
     ("contents", "message"),
     [
@@ -70,7 +85,7 @@ workspace = "Epic"
         ("[common]\nkeyring_service_name = 42\n", "must be a string"),
         ('[common]\nkeyring_service_name = "   "\n', "cannot be empty"),
         ("[common]\ndashboard = 42\n", "dashboard must be a string"),
-        ('[common]\ndashboard = "other.example.com"\n', "must be hosted"),
+        ('[common]\ndashboard = "bad_host.example.com"\n', "Invalid on-premises"),
         (
             '[common]\ndashboard_verify_tls = "false"\n',
             "dashboard_verify_tls must be a boolean",

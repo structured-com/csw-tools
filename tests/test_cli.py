@@ -106,8 +106,9 @@ def test_placeholder_commands_report_pending_and_fail(command_name: str) -> None
 
     assert result.exit_code == 1
     assert "not implemented yet" in result.output
-    assert "Dashboard" in result.output
-    assert "my-company" in result.output
+    assert "CSW Dashboard" in result.output
+    assert "Name: my-company" in result.output
+    assert "URL: https://my-company.tetrationcloud.com" in result.output
 
 
 def test_explicit_missing_config_is_a_click_error(tmp_path: Path) -> None:
@@ -145,12 +146,12 @@ def test_empty_cli_keyring_service_name_is_an_error() -> None:
 def test_invalid_cli_dashboard_is_a_click_error() -> None:
     result = CliRunner().invoke(
         cli,
-        ["--dashboard", "other.example.com", "prune-policy"],
+        ["--dashboard", "bad_host.example.com", "prune-policy"],
     )
 
     assert result.exit_code == 2
     assert "Invalid value for '-d' / '--dashboard'" in result.output
-    assert "must be hosted under tetrationcloud.com" in result.output
+    assert "Invalid on-premises dashboard hostname" in result.output
 
 
 def test_command_configuration_becomes_click_defaults(
@@ -236,15 +237,27 @@ def test_missing_dashboard_prompts_retries_and_prints_normalized_panel() -> None
     result = CliRunner().invoke(
         cli,
         ["prune-policy"],
-        input=("other.example.com\n  HTTPS://MY-COMPANY.TETRATIONCLOUD.COM/  \n"),
+        input=("bad_host.example.com\n  CSW.EXAMPLE.ORG  \n"),
     )
 
     assert result.exit_code == 1
     assert "CSW dashboard:" in result.output
-    assert "must be hosted under tetrationcloud.com" in result.output
-    assert result.output.count("╭─ Dashboard ─╮") == 1
-    assert "my-company" in result.output
+    assert "Invalid on-premises dashboard hostname" in result.output
+    assert result.output.count("CSW Dashboard") == 1
+    assert "Name: csw.example.org" in result.output
+    assert "URL: https://csw.example.org" in result.output
     assert "not implemented yet" in result.output
+
+
+def test_dashboard_panel_safely_renders_ipv6_origin() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["--dashboard", "https://[2001:db8::1]", "prune-policy"],
+    )
+
+    assert result.exit_code == 1
+    assert "Name: 2001:db8::1" in result.output
+    assert "URL: https://[2001:db8::1]" in result.output
 
 
 def test_cli_dashboard_overrides_config_dashboard(tmp_path: Path) -> None:

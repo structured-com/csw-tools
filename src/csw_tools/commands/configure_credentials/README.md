@@ -3,13 +3,14 @@
 Status: core utility.
 
 Inspects whether the CSW API key and secret are configured for one dashboard
-and optionally replaces the pair in the operating system keyring. Credential
-values are never displayed.
+and optionally replaces the pair in the operating system keyring. The API key
+is shown only as a masked preview, and the secret is never displayed.
 
 ## Usage
 
 ```console
 csw-tools -d my-company configure-credentials
+csw-tools -d csw.example.org configure-credentials
 csw-tools -d https://csw.example.org configure-credentials
 ```
 
@@ -32,9 +33,12 @@ an advanced global setting.
 
 ## Interaction and safety
 
-The command reports each value only as `configured` or `missing`, then asks
-whether to store a new pair. No is the default and leaves the keyring unchanged.
-New values use hidden prompts and must each be entered twice for confirmation.
+The command displays the first and last three characters of a configured API
+key with the middle masked. Keys of six characters or fewer are masked in full.
+The secret is reported only as `(configured, hidden)`; missing values are
+identified clearly. It then asks whether to store a new pair. No is the default
+and leaves the keyring unchanged. Each new value is entered once through a
+hidden prompt, followed by a character count so pasted input can be checked.
 
 If keyring access fails, the error excludes all secret values. Because the key
 and secret are stored separately, a backend failure during the second write may

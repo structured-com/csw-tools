@@ -111,15 +111,18 @@ resolved values from Click/AppContext rather than reparsing TOML themselves.
 
 ## Dashboard, credentials, and CSW API
 
-`dashboard.py` accepts a SaaS short name, a `tetrationcloud.com` FQDN, or an
-HTTPS URL. Non-SaaS/on-premises dashboards require an explicit HTTPS origin.
-Normalization rejects user information, paths, queries, fragments, and custom
-ports so API endpoints and keyring namespaces are unambiguous.
+`dashboard.py` accepts a SaaS short name, any valid ASCII FQDN, or an HTTPS
+origin. A short name expands under `tetrationcloud.com`; a dotted non-SaaS FQDN
+normalizes to the same URL-based identity as its explicit HTTPS form. IP
+addresses and ambiguous single-label on-premises hosts require the explicit
+URL. Normalization rejects user information, paths, queries, fragments, and
+custom ports so API endpoints and keyring namespaces are unambiguous.
 
 `dashboard_command` prompts only if no dashboard was supplied, calls
 `AppContext.activate_dashboard()`, and displays the canonical selection. The
 activation appends the dashboard name to the base keyring service, isolating
-credentials between organizations.
+credentials between organizations. Its Rich panel shows a display name and the
+canonical URL using markup-safe text objects.
 
 `create_api_client()` retrieves the fixed API-key and secret usernames lazily
 from `KeyringStore` and constructs `tetpyclient.RestClient` with the normalized
@@ -160,15 +163,19 @@ The root CLI intentionally substitutes an empty `AppConfig` for `init`, allowing
 an invalid existing file to be replaced. The command receives the resolved
 target through `AppContext.config_path`, reads the packaged example with
 `importlib.resources`, writes beside the target, and atomically replaces it only
-after confirmation. It does not activate a dashboard or keyring.
+after confirmation. After any successful create, replace, or retain path, it
+offers to open the containing directory through the native desktop launcher.
+Launcher errors are warnings and do not turn successful initialization into a
+failure. It does not activate a dashboard or keyring.
 
 ### `configure-credentials`
 
 This command uses the normal interactive and dashboard decorators. Dashboard
 activation constructs the scoped keyring service before the command checks the
-two fixed usernames. Prompts hide and confirm each value. Keyring errors must
-never include secrets and should warn that separate writes may leave an
-incomplete pair.
+two fixed usernames. The stored API key is partially masked, and the API secret
+is never displayed. New-value prompts hide each one, collect it once, and report
+only its character count. Keyring errors must never include secrets and should
+warn that separate writes may leave an incomplete pair.
 
 See the command READMEs for complete user-facing details:
 

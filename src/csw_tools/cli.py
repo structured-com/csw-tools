@@ -95,7 +95,7 @@ def show_version(ctx: click.Context, _parameter: click.Parameter, value: bool) -
     "-d",
     "--dashboard",
     type=DASHBOARD,
-    help="Use this Secure Workload dashboard (name, FQDN, or HTTPS URL).",
+    help="Use this Secure Workload dashboard (SaaS name, FQDN, or HTTPS origin).",
 )
 @click.option(
     "--dashboard-verify-tls/--no-dashboard-verify-tls",

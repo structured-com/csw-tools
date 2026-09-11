@@ -22,6 +22,30 @@ def test_normalizes_supported_dashboard_forms(value: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("value", "fqdn"),
+    [
+        ("csw.example.org", "csw.example.org"),
+        ("https://csw.example.org", "csw.example.org"),
+        ("https://csw.example.org/", "csw.example.org"),
+        ("  CSW.EXAMPLE.ORG  ", "csw.example.org"),
+        ("nested.my-company", "nested.my-company"),
+    ],
+)
+def test_normalizes_non_saas_fqdn_and_https_origin(value: str, fqdn: str) -> None:
+    dashboard = normalize_dashboard(value)
+
+    assert dashboard.name == f"https://{fqdn}"
+    assert dashboard.fqdn == fqdn
+    assert dashboard.url == dashboard.name
+
+
+def test_bare_and_explicit_non_saas_forms_share_identity() -> None:
+    assert normalize_dashboard("csw.example.org") == normalize_dashboard(
+        "https://csw.example.org"
+    )
+
+
+@pytest.mark.parametrize(
     "value",
     [
         "",
@@ -31,9 +55,9 @@ def test_normalizes_supported_dashboard_forms(value: str) -> None:
         "my_company",
         "my company",
         "a" * 64,
-        "nested.my-company",
         "tetrationcloud.com",
-        "my-company.example.com",
+        "bad_host.example.com",
+        "192.0.2.1",
         "http://my-company.tetrationcloud.com",
         "https://[",
         "https://my-company.tetrationcloud.com:443",

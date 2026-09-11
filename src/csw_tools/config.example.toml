@@ -6,10 +6,9 @@
 
 ## Secure Workload (formerly Tetration) dashboard used for API calls.
 ## Accepted formats:
-##   URL:  https://my-company.tetrationcloud.com
+##   SaaS name: my-company (expands to include .tetrationcloud.com)
 ##   FQDN: my-company.tetrationcloud.com
-##   Name: my-company
-##   On-premises: https://csw.example.org (explicit HTTPS URL required)
+##   HTTPS origin: https://csw.example.org
 # dashboard = ""
 
 ## Verify the dashboard TLS certificate.
