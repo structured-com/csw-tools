@@ -18,20 +18,26 @@ from csw_tools.keyring_store import KeyringStoreError
     ("stored", "expected_key_status", "expected_secret_status"),
     [
         ({}, "missing", "missing"),
-        ({CSW_API_KEY_USERNAME: "stored-key-value"}, "configured", "missing"),
+        (
+            {CSW_API_KEY_USERNAME: "stored-key-value"},
+            "sto" + ("•" * 10) + "lue",
+            "missing",
+        ),
         (
             {CSW_API_SECRET_USERNAME: "stored-secret-value"},
             "missing",
-            "configured",
+            "(configured, hidden)",
         ),
         (
             {
                 CSW_API_KEY_USERNAME: "stored-key-value",
                 CSW_API_SECRET_USERNAME: "stored-secret-value",
             },
-            "configured",
-            "configured",
+            "sto" + ("•" * 10) + "lue",
+            "(configured, hidden)",
         ),
+        ({CSW_API_KEY_USERNAME: "short"}, "•" * 5, "missing"),
+        ({CSW_API_KEY_USERNAME: "[abmiddle]xy"}, "[ab" + ("•" * 6) + "]xy", "missing"),
         (
             {
                 CSW_API_KEY_USERNAME: "",
@@ -105,7 +111,7 @@ def test_configure_credentials_collects_pair_before_writing(
             writes.append((username, password))
 
     monkeypatch.setattr(cli_module, "KeyringStore", FakeKeyringStore)
-    user_input = "y\nactual-key\nactual-key\nactual-secret\nactual-secret\n"
+    user_input = "y\nactual-key\nactual-secret\n"
 
     result = CliRunner().invoke(
         cli,
@@ -121,11 +127,22 @@ def test_configure_credentials_collects_pair_before_writing(
     ]
     assert "actual-key" not in result.output
     assert "actual-secret" not in result.output
+    assert "CSW API key: 10 characters entered." in result.output
+    assert "CSW API secret: 13 characters entered." in result.output
+    assert "Repeat for confirmation" not in result.output
     assert "Stored CSW API credentials" in result.output
     assert "custom-service" in result.output
+    [output_log] = Path(cli_module.DEFAULT_OUTPUT_DIRECTORY).glob(
+        "csw-tools-configure-credentials-*.log"
+    )
+    transcript = output_log.read_text(encoding="utf-8")
+    assert "actual-key" not in transcript
+    assert "actual-secret" not in transcript
+    assert "CSW API key: 10 characters entered." in transcript
+    assert "CSW API secret: 13 characters entered." in transcript
 
 
-def test_configure_credentials_retries_mismatched_hidden_input(
+def test_configure_credentials_prompts_once_for_each_hidden_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     writes: list[tuple[str, str]] = []
@@ -141,9 +158,7 @@ def test_configure_credentials_retries_mismatched_hidden_input(
             writes.append((username, password))
 
     monkeypatch.setattr(cli_module, "KeyringStore", FakeKeyringStore)
-    user_input = (
-        "y\nfirst-key\nwrong-key\nfinal-key\nfinal-key\nfinal-secret\nfinal-secret\n"
-    )
+    user_input = "y\nfirst-key\nfirst-secret\n"
 
     result = CliRunner().invoke(
         cli,
@@ -152,12 +167,14 @@ def test_configure_credentials_retries_mismatched_hidden_input(
     )
 
     assert result.exit_code == 0
-    assert "do not match" in result.output
     assert writes == [
-        (CSW_API_KEY_USERNAME, "final-key"),
-        (CSW_API_SECRET_USERNAME, "final-secret"),
+        (CSW_API_KEY_USERNAME, "first-key"),
+        (CSW_API_SECRET_USERNAME, "first-secret"),
     ]
-    for value in ("first-key", "wrong-key", "final-key", "final-secret"):
+    assert "CSW API key: 9 characters entered." in result.output
+    assert "CSW API secret: 12 characters entered." in result.output
+    assert "Repeat for confirmation" not in result.output
+    for value in ("first-key", "first-secret"):
         assert value not in result.output
 
 
@@ -197,7 +214,7 @@ def test_configure_credentials_reports_possibly_incomplete_write(
                 raise KeyringStoreError("Could not store API secret")
 
     monkeypatch.setattr(cli_module, "KeyringStore", FakeKeyringStore)
-    user_input = "y\nwrite-key\nwrite-key\nwrite-secret\nwrite-secret\n"
+    user_input = "y\nwrite-key\nwrite-secret\n"
 
     result = CliRunner().invoke(
         cli,

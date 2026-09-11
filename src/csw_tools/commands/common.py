@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -10,7 +12,29 @@ from csw_tools.change_control import BackupError
 from csw_tools.context import AppContext
 from csw_tools.csw_api import CswApi, CswApiError, create_api_client
 
-DEFAULT_BACKUP_DIRECTORY = Path("csw-tools-backups")
+
+def legacy_backup_dir_option[CommandFunction: Callable[..., Any]](
+    function: CommandFunction,
+) -> CommandFunction:
+    """Consume the removed option and report its common replacement."""
+
+    def reject_backup_dir(
+        ctx: click.Context, _parameter: click.Parameter, value: Path | None
+    ) -> None:
+        if value is not None and not ctx.resilient_parsing:
+            command_name = ctx.info_name or "COMMAND"
+            raise click.UsageError(
+                "--backup-dir has moved to the global --output-dir option; use "
+                f"'csw-tools --output-dir PATH {command_name}'"
+            )
+
+    return click.option(
+        "--backup-dir",
+        type=click.Path(path_type=Path, file_okay=False),
+        callback=reject_backup_dir,
+        expose_value=False,
+        hidden=True,
+    )(function)
 
 
 def api_for(app: AppContext) -> CswApi:

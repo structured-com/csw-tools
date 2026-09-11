@@ -14,9 +14,9 @@ from rich.table import Table
 
 from csw_tools.change_control import backup_path, load_backup, new_backup, write_backup
 from csw_tools.commands.common import (
-    DEFAULT_BACKUP_DIRECTORY,
     api_for,
     command_error,
+    legacy_backup_dir_option,
     require_apply_for_rollback,
 )
 from csw_tools.context import AppContext, pass_app_context
@@ -498,13 +498,6 @@ def rollback_scopes(api: CswApi, backup: dict[str, object]) -> int:
     type=click.Path(path_type=Path, dir_okay=False, exists=True),
 )
 @click.option(
-    "--backup-dir",
-    type=click.Path(path_type=Path, file_okay=False),
-    default=DEFAULT_BACKUP_DIRECTORY,
-    show_default=True,
-    help=("Directory for automatic JSON backups and uniquely named failure logs."),
-)
-@click.option(
     "--apply/--dry-run",
     default=False,
     show_default=True,
@@ -518,13 +511,13 @@ def rollback_scopes(api: CswApi, backup: dict[str, object]) -> int:
         "requires --apply."
     ),
 )
+@legacy_backup_dir_option
 @pass_app_context
 @interactive_command
 @dashboard_command
 def command(
     app: AppContext,
     csv_file: Path | None,
-    backup_dir: Path,
     apply: bool,
     rollback: Path | None,
 ) -> None:
@@ -538,8 +531,8 @@ def command(
     fully qualified parent scope name. description and policy_priority are optional.
     query is the friendly form; filter_json is a quoted CSW short_query object for
     advanced use. Supply at most one. If both are blank or omitted, the scope is
-    created with the no-filter short_query {"type":"none"}. Parent rows must precede their
-    children.
+    created with the no-filter short_query {"type":"none"}. Parent rows must
+    precede their children.
 
     Friendly query syntax supports =, !=, EQ, NE, IN, CONTAINS, REGEX, AND, OR,
     NOT, and parentheses. Precedence is NOT, then AND, then OR. A UI label such as
@@ -565,9 +558,9 @@ def command(
 
     Existing fully qualified scope names are skipped. Row validation and API errors
     include the CSV line number; independent rows continue processing. Failures are
-    written to a unique create-scopes-errors-*.log file in --backup-dir. Every run
-    finishes with created, failed, and skipped totals. A partial failure exits
-    nonzero after processing all rows.
+    written to a unique create-scopes-errors-*.log file in the common output
+    directory. Every run finishes with created, failed, and skipped totals. A
+    partial failure exits nonzero after processing all rows.
 
     The default is --dry-run. --apply creates a timestamped JSON backup before the
     first scope. The backup is updated after every attempt so --apply --rollback
@@ -620,7 +613,7 @@ def command(
             )
         app.console.print(table)
 
-        error_path = scope_error_log_path(backup_dir)
+        error_path = scope_error_log_path(app.output_dir)
         ready, failed, skipped = plan_counts(operations)
         if failed:
             write_scope_error_log(error_path, csv_file, operations)
@@ -651,7 +644,7 @@ def command(
         backup = new_backup(
             command=COMMAND_NAME, dashboard=app.dashboard, operations=operations
         )
-        path = backup_path(backup_dir, COMMAND_NAME)
+        path = backup_path(app.output_dir, COMMAND_NAME)
 
         def save_progress() -> None:
             write_backup(path, backup)

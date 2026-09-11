@@ -12,7 +12,7 @@ from csw_tools.interaction import interactive_command
 @interactive_command
 @dashboard_command
 def command(app: AppContext) -> None:
-    """Run the prune-policy utility (not implemented yet)."""
+    """(DEV/TESTING) Run the prune-policy utility (not implemented yet)."""
 
     app.error_console.print(
         "[yellow]The 'prune-policy' command is not implemented yet.[/yellow]"

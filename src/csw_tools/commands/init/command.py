@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from contextlib import suppress
 from importlib import resources
 from pathlib import Path
@@ -12,6 +15,39 @@ import click
 from csw_tools.config_defaults import CONFIG_EXAMPLE_FILENAME
 from csw_tools.context import AppContext, pass_app_context
 from csw_tools.interaction import interactive_command
+
+
+class DirectoryOpenError(RuntimeError):
+    """Raised when the native file manager cannot open a directory."""
+
+
+def _open_directory(directory: Path) -> None:
+    """Open ``directory`` with the native file manager for this platform."""
+
+    try:
+        if sys.platform == "win32":
+            startfile = getattr(os, "startfile", None)
+            if startfile is None:
+                raise OSError("Windows directory opening is unavailable")
+            startfile(directory)
+            return
+        if sys.platform == "darwin":
+            command = ["open", str(directory)]
+        elif sys.platform.startswith("linux"):
+            command = ["xdg-open", str(directory)]
+        else:
+            raise OSError(f"Unsupported desktop platform: {sys.platform}")
+
+        subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise DirectoryOpenError(
+            f"Could not open configuration directory: '{directory}'"
+        ) from exc
 
 
 def _copy_example_config(target_path: Path) -> None:
@@ -76,3 +112,9 @@ def command(app: AppContext) -> None:
         "To configure CSW API credentials, next run "
         "[bold]csw-tools configure-credentials[/bold]."
     )
+
+    if click.confirm("Open configuration directory now?", default=False):
+        try:
+            _open_directory(target_path.parent)
+        except DirectoryOpenError as exc:
+            app.error_console.print(f"Warning: {exc}", markup=False)

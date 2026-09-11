@@ -1,6 +1,6 @@
 [project]
 name = "csw-tools"
-version = "0.2.0"
+version = "0.3.0"
 description = "A collection of automation utilities for Cisco Secure Workload (CSW), available through this single package."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -46,4 +46,4 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.uv.build-backend]
-source-include = ["tests/**"]
+source-include = ["tests/**", "DEV-GUIDELINES.md", ".python-version"]

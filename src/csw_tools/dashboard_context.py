@@ -9,6 +9,7 @@ from typing import cast
 import click
 from rich import box
 from rich.panel import Panel
+from rich.text import Text
 
 from csw_tools.context import AppContext
 from csw_tools.dashboard import DASHBOARD
@@ -26,15 +27,26 @@ def dashboard_command[**P, R](
             dashboard = click.prompt("CSW dashboard", type=DASHBOARD)
 
         app.activate_dashboard(dashboard)
+        display_name = (
+            dashboard.fqdn if dashboard.name == dashboard.url else dashboard.name
+        )
+        details = Text.assemble(
+            ("Name: ", "bold"),
+            (display_name, "bold cyan"),
+            "\n",
+            ("URL: ", "bold"),
+            (dashboard.url, "cyan"),
+        )
+        app.console.print()
         app.console.print(
-            Panel(
-                f"Using CSW Dashboard: [bold][cyan]{dashboard.name}[/cyan][/bold]",
+            Panel.fit(
+                details,
                 box=box.ROUNDED,
                 safe_box=False,
-                title="Dashboard",
-                width=15,
+                title="CSW Dashboard",
             )
         )
+        app.console.print()
         return function(app, *args, **kwargs)
 
     return cast(Callable[P, R], prepared)

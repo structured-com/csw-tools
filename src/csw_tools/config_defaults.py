@@ -1,11 +1,15 @@
 """Backend defaults shared by csw-tools commands."""
 
+from pathlib import Path
+
 APP_NAME = "csw-tools"
 CONFIG_FILENAME = "config.toml"
 CONFIG_EXAMPLE_FILENAME = "config.example.toml"
 
 DEFAULT_KEYRING_SERVICE_NAME = "csw-tools"
 DEFAULT_DASHBOARD_VERIFY_TLS = True
+DEFAULT_OUTPUT_DIRECTORY = Path("csw-tools-outputs")
+DEFAULT_LOG_CLI_OUTPUT = True
 TETRATION_CLOUD_DOMAIN = "tetrationcloud.com"
 CSW_API_KEY_USERNAME = "csw:api_key"
 CSW_API_SECRET_USERNAME = "csw:api_secret"

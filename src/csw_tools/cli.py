@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, cast
 
 import click
 from rich.console import Console
@@ -31,14 +34,69 @@ from csw_tools.config import (
 from csw_tools.config_defaults import (
     DEFAULT_DASHBOARD_VERIFY_TLS,
     DEFAULT_KEYRING_SERVICE_NAME,
+    DEFAULT_LOG_CLI_OUTPUT,
+    DEFAULT_OUTPUT_DIRECTORY,
 )
 from csw_tools.context import AppContext
 from csw_tools.dashboard import DASHBOARD, Dashboard
 from csw_tools.keyring_store import KeyringStore
+from csw_tools.output_logging import (
+    OutputLogError,
+    disable_failed_output_logging,
+    prepare_output_logging,
+    start_output_logging,
+    stop_output_logging,
+)
+from csw_tools.project_info import format_version_info
+
+
+class OutputDirectoryPath(click.Path):
+    """Reject an explicitly empty directory while preserving valid '.'."""
+
+    def convert(
+        self,
+        value: str | bytes | Path,
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> Path:
+        if isinstance(value, str) and not value.strip():
+            self.fail("output directory cannot be empty", param, ctx)
+        return cast(Path, super().convert(value, param, ctx))
 
 
 class FullCommandHelpGroup(click.Group):
     """Wrap command summaries instead of shortening them with ellipses."""
+
+    def main(
+        self,
+        args: Sequence[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        windows_expand_args: bool = True,
+        **extra: Any,
+    ) -> Any:
+        """Keep transcript streams active through Click's final error output."""
+
+        log_token = prepare_output_logging()
+        try:
+            return super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=standalone_mode,
+                windows_expand_args=windows_expand_args,
+                **extra,
+            )
+        except OutputLogError as exc:
+            disable_failed_output_logging()
+            error = click.ClickException(str(exc))
+            if not standalone_mode:
+                raise error from exc
+            error.show()
+            raise SystemExit(error.exit_code) from exc
+        finally:
+            stop_output_logging(log_token)
 
     def format_commands(
         self, ctx: click.Context, formatter: click.HelpFormatter
@@ -55,6 +113,21 @@ class FullCommandHelpGroup(click.Group):
         if rows:
             with formatter.section("Commands"):
                 formatter.write_dl(rows)
+
+
+def show_version(ctx: click.Context, _parameter: click.Parameter, value: bool) -> None:
+    """Print project and interpreter information, then exit."""
+
+    if not value or ctx.resilient_parsing:
+        return
+    try:
+        output = format_version_info()
+    except (OSError, KeyError, RuntimeError, tomllib.TOMLDecodeError) as exc:
+        raise click.ClickException(
+            f"Could not load project version information: {exc}"
+        ) from exc
+    click.echo(output)
+    ctx.exit()
 
 
 @click.group(
@@ -78,14 +151,37 @@ class FullCommandHelpGroup(click.Group):
     "-d",
     "--dashboard",
     type=DASHBOARD,
-    help="Use this Secure Workload dashboard (name, FQDN, or HTTPS URL).",
+    help="Use this Secure Workload dashboard (SaaS name, FQDN, or HTTPS origin).",
 )
 @click.option(
     "--dashboard-verify-tls/--no-dashboard-verify-tls",
     default=None,
     help="Enable or disable TLS certificate verification for dashboard APIs.",
 )
-@click.version_option(package_name="csw-tools")
+@click.option(
+    "--output-dir",
+    type=OutputDirectoryPath(path_type=Path, file_okay=False),
+    help=(
+        "Directory for command-generated backups, journals, reports, and CLI "
+        f"logs. Default: {DEFAULT_OUTPUT_DIRECTORY}."
+    ),
+)
+@click.option(
+    "--log-cli-output/--no-log-cli-output",
+    default=None,
+    help=(
+        "Save or do not save a combined stdout/stderr transcript for the "
+        "selected command. Enabled by default."
+    ),
+)
+@click.option(
+    "--version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=show_version,
+    help="Show project and Python version information, then exit.",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -93,6 +189,8 @@ def cli(
     keyring_service_name: str | None,
     dashboard: Dashboard | None,
     dashboard_verify_tls: bool | None,
+    output_dir: Path | None,
+    log_cli_output: bool | None,
 ) -> None:
     """A collection of automation utilities for Cisco Secure Workload (CSW)"""
 
@@ -107,7 +205,11 @@ def cli(
             .resolve()
         )
         if ctx.invoked_subcommand == "init":
-            config = AppConfig()
+            try:
+                config = load_config(selected_config_path, explicit=False)
+            except ConfigError:
+                # init must remain able to replace malformed configuration.
+                config = AppConfig()
         else:
             config = load_config(
                 selected_config_path,
@@ -135,16 +237,44 @@ def cli(
         )
         if resolved_dashboard_verify_tls is None:
             raise ConfigError("Dashboard TLS verification could not be resolved")
+        resolved_output_dir = resolve_setting(
+            name="output directory",
+            cli_value=output_dir,
+            config_value=config.common.output_dir,
+            default=DEFAULT_OUTPUT_DIRECTORY,
+        )
+        if resolved_output_dir is None:
+            raise ConfigError("The output directory could not be resolved")
+        try:
+            resolved_output_dir = resolved_output_dir.expanduser().resolve()
+        except (OSError, RuntimeError) as exc:
+            raise ConfigError(
+                f"Could not resolve output directory: {resolved_output_dir}"
+            ) from exc
+        resolved_log_cli_output = resolve_setting(
+            name="CLI output logging",
+            cli_value=log_cli_output,
+            config_value=config.common.log_cli_output,
+            default=DEFAULT_LOG_CLI_OUTPUT,
+        )
+        if resolved_log_cli_output is None:
+            raise ConfigError("CLI output logging could not be resolved")
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
     ctx.default_map = config.as_click_default_map()
+    if resolved_log_cli_output:
+        command_name = ctx.invoked_subcommand
+        assert command_name is not None
+        output_log = start_output_logging(resolved_output_dir, command_name)
+        click.echo(f"CLI output log: '{output_log.path}'", err=True)
     ctx.obj = AppContext(
         config=config,
         config_path=selected_config_path,
         keyring_service_name=resolved_service_name,
         dashboard=resolved_dashboard,
         dashboard_verify_tls=resolved_dashboard_verify_tls,
+        output_dir=resolved_output_dir,
         console=Console(),
         error_console=Console(stderr=True),
         _keyring_factory=KeyringStore,

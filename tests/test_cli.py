@@ -1,3 +1,5 @@
+import platform
+import tomllib
 from pathlib import Path
 
 import click
@@ -19,6 +21,9 @@ def test_help_lists_all_commands_and_global_options() -> None:
     assert "-d, --dashboard" in result.output
     assert "--dashboard-verify-tls" in result.output
     assert "--no-dashboard-verify-tls" in result.output
+    assert "--output-dir" in result.output
+    assert "--log-cli-output" in result.output
+    assert "--no-log-cli-output" in result.output
     assert "--no-input" not in result.output
     for command_name in (
         "configure-credentials",
@@ -46,11 +51,53 @@ def test_command_descriptions_wrap_without_truncation(
     assert "..." not in output
 
 
+def test_development_commands_are_marked_in_root_help() -> None:
+    result = CliRunner().invoke(cli, ["--help"], terminal_width=120)
+
+    assert result.exit_code == 0
+    for command_name in (
+        "clean-stale-labels",
+        "convert-labels",
+        "prune-agents",
+        "prune-policy",
+        "sync-collection-rules",
+    ):
+        command = cli.commands[command_name]
+        assert command.get_short_help_str().startswith("(DEV/TESTING)")
+
+    for command_name in ("configure-credentials", "create-scopes", "init"):
+        command = cli.commands[command_name]
+        assert not command.get_short_help_str().startswith("(DEV/TESTING)")
+
+
 def test_version_comes_from_package_metadata() -> None:
+    result = CliRunner().invoke(cli, ["--version"])
+    with Path("pyproject.toml").open("rb") as project_file:
+        project = tomllib.load(project_file)["project"]
+
+    assert result.exit_code == 0
+    assert result.output == (
+        f"{project['name']} {project['version']}\n"
+        f"{project['description']}\n"
+        f"Python: project {Path('.python-version').read_text().strip()} | "
+        f"required {project['requires-python']} | running {platform.python_version()}\n"
+        f"License: {project['license']}\n"
+        f"Homepage: {project['urls']['Homepage']}\n"
+    )
+
+
+def test_version_exits_before_loading_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_config_load(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("version output loaded configuration")
+
+    monkeypatch.setattr(cli_module, "load_config", unexpected_config_load)
+
     result = CliRunner().invoke(cli, ["--version"])
 
     assert result.exit_code == 0
-    assert "0.1.0" in result.output
+    assert "CSW dashboard:" not in result.output
 
 
 @pytest.mark.parametrize(
@@ -62,8 +109,9 @@ def test_placeholder_commands_report_pending_and_fail(command_name: str) -> None
 
     assert result.exit_code == 1
     assert "not implemented yet" in result.output
-    assert "Dashboard" in result.output
-    assert "my-company" in result.output
+    assert "CSW Dashboard" in result.output
+    assert "Name: my-company" in result.output
+    assert "URL: https://my-company.tetrationcloud.com" in result.output
 
 
 def test_explicit_missing_config_is_a_click_error(tmp_path: Path) -> None:
@@ -101,12 +149,12 @@ def test_empty_cli_keyring_service_name_is_an_error() -> None:
 def test_invalid_cli_dashboard_is_a_click_error() -> None:
     result = CliRunner().invoke(
         cli,
-        ["--dashboard", "other.example.com", "prune-policy"],
+        ["--dashboard", "bad_host.example.com", "prune-policy"],
     )
 
     assert result.exit_code == 2
     assert "Invalid value for '-d' / '--dashboard'" in result.output
-    assert "must be hosted under tetrationcloud.com" in result.output
+    assert "Invalid on-premises dashboard hostname" in result.output
 
 
 def test_command_configuration_becomes_click_defaults(
@@ -139,11 +187,11 @@ def test_command_configuration_becomes_click_defaults(
     from_backend = runner.invoke(cli, ["prune-policy"])
 
     assert from_config.exit_code == 0
-    assert from_config.output.strip() == "from-config"
+    assert from_config.stdout.strip() == "from-config"
     assert from_cli.exit_code == 0
-    assert from_cli.output.strip() == "from-cli"
+    assert from_cli.stdout.strip() == "from-cli"
     assert from_backend.exit_code == 0
-    assert from_backend.output.strip() == "from-backend"
+    assert from_backend.stdout.strip() == "from-backend"
 
 
 @pytest.mark.parametrize(
@@ -192,15 +240,44 @@ def test_missing_dashboard_prompts_retries_and_prints_normalized_panel() -> None
     result = CliRunner().invoke(
         cli,
         ["prune-policy"],
-        input=("other.example.com\n  HTTPS://MY-COMPANY.TETRATIONCLOUD.COM/  \n"),
+        input=("bad_host.example.com\n  CSW.EXAMPLE.ORG  \n"),
     )
 
     assert result.exit_code == 1
     assert "CSW dashboard:" in result.output
-    assert "must be hosted under tetrationcloud.com" in result.output
-    assert result.output.count("╭─ Dashboard ─╮") == 1
-    assert "my-company" in result.output
+    assert "Invalid on-premises dashboard hostname" in result.output
+    assert result.output.count("CSW Dashboard") == 1
+    assert "Name: csw.example.org" in result.output
+    assert "URL: https://csw.example.org" in result.output
     assert "not implemented yet" in result.output
+
+
+def test_dashboard_panel_safely_renders_ipv6_origin() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["--dashboard", "https://[2001:db8::1]", "prune-policy"],
+    )
+
+    assert result.exit_code == 1
+    assert "Name: 2001:db8::1" in result.output
+    assert "URL: https://[2001:db8::1]" in result.output
+
+
+def test_dashboard_panel_has_blank_line_before_and_after() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["--dashboard", "my-company", "prune-policy"],
+    )
+
+    lines = result.output.splitlines()
+    top = next(index for index, line in enumerate(lines) if "CSW Dashboard" in line)
+    bottom = next(
+        index
+        for index, line in enumerate(lines[top + 1 :], start=top + 1)
+        if line.startswith("╰")
+    )
+    assert lines[top - 1] == ""
+    assert lines[bottom + 1] == ""
 
 
 def test_cli_dashboard_overrides_config_dashboard(tmp_path: Path) -> None:
@@ -264,7 +341,53 @@ def test_dashboard_verify_tls_precedence(
     result = CliRunner().invoke(cli, arguments)
 
     assert result.exit_code == 0
-    assert result.output.strip() == str(expected)
+    assert result.stdout.strip() == str(expected)
+
+
+@pytest.mark.parametrize(
+    ("use_config", "use_cli", "expected_source"),
+    [
+        (False, False, "backend"),
+        (True, False, "config"),
+        (True, True, "cli"),
+    ],
+)
+def test_output_directory_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    use_config: bool,
+    use_cli: bool,
+    expected_source: str,
+) -> None:
+    @click.command("prune-policy")
+    @pass_app_context
+    def probe_command(app: AppContext) -> None:
+        click.echo(str(app.output_dir))
+
+    monkeypatch.setitem(cli.commands, "prune-policy", probe_command)
+    config_output = tmp_path / "from-config"
+    cli_output = tmp_path / "from-cli"
+    arguments: list[str] = ["--no-log-cli-output"]
+    if use_config:
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            f'[common]\noutput_dir = "{config_output}"\n',
+            encoding="utf-8",
+        )
+        arguments.extend(("--config", str(config_path)))
+    if use_cli:
+        arguments.extend(("--output-dir", str(cli_output)))
+    arguments.append("prune-policy")
+
+    result = CliRunner().invoke(cli, arguments)
+
+    expected = {
+        "backend": Path(cli_module.DEFAULT_OUTPUT_DIRECTORY).resolve(),
+        "config": config_output.resolve(),
+        "cli": cli_output.resolve(),
+    }[expected_source]
+    assert result.exit_code == 0
+    assert result.stdout.strip() == str(expected)
 
 
 @pytest.mark.parametrize(

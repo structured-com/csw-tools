@@ -26,9 +26,7 @@ class Dashboard:
 
 
 _DASHBOARD_NAME_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
-_DASHBOARD_FORMAT_MESSAGE = (
-    f"use a dashboard name, its .{TETRATION_CLOUD_DOMAIN} FQDN, or its HTTPS URL"
-)
+_DASHBOARD_FORMAT_MESSAGE = "use a SaaS dashboard name, a valid FQDN, or an HTTPS URL"
 
 
 def normalize_dashboard(value: str) -> Dashboard:
@@ -40,7 +38,8 @@ def normalize_dashboard(value: str) -> Dashboard:
     if any(character.isspace() for character in candidate):
         raise DashboardError("Dashboard cannot contain whitespace")
 
-    if "://" in candidate:
+    is_url = "://" in candidate
+    if is_url:
         try:
             parsed = urlsplit(candidate)
             hostname = parsed.hostname
@@ -71,36 +70,44 @@ def normalize_dashboard(value: str) -> Dashboard:
         host = candidate
 
     fqdn_suffix = f".{TETRATION_CLOUD_DOMAIN}"
-    # Bare identifiers retain their original SaaS meaning. An explicit HTTPS
-    # origin is required for on-premises, preventing accidental credential reuse.
-    if "://" in candidate and not host.endswith(fqdn_suffix):
-        try:
-            address = ipaddress.ip_address(host)
-        except ValueError:
-            if len(host) > 253 or not all(
-                _DASHBOARD_NAME_PATTERN.fullmatch(label) for label in host.split(".")
-            ):
-                raise DashboardError("Invalid on-premises dashboard hostname") from None
-            origin = host
-        else:
-            host = str(address)
-            origin = f"[{host}]" if address.version == 6 else host
-        return Dashboard(name=f"https://{origin}", fqdn=host, url=f"https://{origin}")
+    if host == TETRATION_CLOUD_DOMAIN:
+        raise DashboardError("Dashboard FQDN must include a tenant hostname")
     if host.endswith(fqdn_suffix):
         name = host.removesuffix(fqdn_suffix)
-    elif "." in host:
-        raise DashboardError(f"Dashboard must be hosted under {TETRATION_CLOUD_DOMAIN}")
-    else:
+    elif not is_url and "." not in host:
         name = host
+    else:
+        name = None
 
-    if not _DASHBOARD_NAME_PATTERN.fullmatch(name):
-        raise DashboardError(
-            "Dashboard name must be one DNS label of 1-63 lowercase letters, "
-            "numbers, or interior hyphens"
-        )
+    if name is not None:
+        if not _DASHBOARD_NAME_PATTERN.fullmatch(name):
+            raise DashboardError(
+                "Dashboard name must be one DNS label of 1-63 lowercase letters, "
+                "numbers, or interior hyphens"
+            )
 
-    fqdn = f"{name}.{TETRATION_CLOUD_DOMAIN}"
-    return Dashboard(name=name, fqdn=fqdn, url=f"https://{fqdn}")
+        fqdn = f"{name}.{TETRATION_CLOUD_DOMAIN}"
+        return Dashboard(name=name, fqdn=fqdn, url=f"https://{fqdn}")
+
+    # A dotted bare hostname is unambiguously a non-SaaS dashboard. Normalize it
+    # to the same URL-based identity already used by explicit on-premises URLs.
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if len(host) > 253 or not all(
+            _DASHBOARD_NAME_PATTERN.fullmatch(label) for label in host.split(".")
+        ):
+            raise DashboardError("Invalid on-premises dashboard hostname") from None
+        origin = host
+    else:
+        if not is_url:
+            raise DashboardError(
+                "Bare IP addresses are not supported; use an explicit HTTPS URL"
+            )
+        host = str(address)
+        origin = f"[{host}]" if address.version == 6 else host
+
+    return Dashboard(name=f"https://{origin}", fqdn=host, url=f"https://{origin}")
 
 
 class DashboardParamType(click.ParamType):

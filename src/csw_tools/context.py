@@ -52,6 +52,9 @@ class AppContext:
     # Whether API requests should verify the dashboard's TLS certificate.
     dashboard_verify_tls: bool
 
+    # Common location for command-owned backups, journals, reports, and logs.
+    output_dir: Path
+
     # Rich output directed to stdout. Use this for the command's normal results
     # so callers can redirect or pipe those results without diagnostic noise.
     console: Console

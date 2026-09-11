@@ -484,12 +484,12 @@ def test_cli_apply_prompts_for_every_element_and_defaults_no(monkeypatch, tmp_pa
         [
             "-d",
             "acme",
+            "--output-dir",
+            str(tmp_path),
             "prune-agents",
             "--lastdate",
             "200",
             "--apply",
-            "--backup-dir",
-            str(tmp_path),
         ],
         input="\n" * 4,
     )
@@ -511,13 +511,13 @@ def test_cli_noconfirm_does_not_require_terminal(monkeypatch, tmp_path):
         [
             "-d",
             "acme",
+            "--output-dir",
+            str(tmp_path),
             "prune-agents",
             "--lastdate",
             "200",
             "--noconfirm",
             "--apply",
-            "--backup-dir",
-            str(tmp_path),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -729,13 +729,13 @@ def test_cli_failed_run_returns_nonzero_with_journal(monkeypatch, tmp_path):
         [
             "-d",
             "acme",
+            "--output-dir",
+            str(tmp_path),
             "prune-agents",
             "--lastdate",
             "200",
             "--apply",
             "--noconfirm",
-            "--backup-dir",
-            str(tmp_path),
         ],
     )
     assert result.exit_code == 1
