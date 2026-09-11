@@ -60,13 +60,14 @@ The command-specific options are:
 | `--label SOURCE[:TARGET]` | Field to persist; repeat for multiple mappings |
 | `--scope NAME` | Exact fully qualified implied scope used for inventory search |
 | `--page-size INTEGER` | Inventory records requested per API page; default 500 |
-| `--backup-dir DIRECTORY` | Backup location; default `csw-tools-backups` |
 | `--apply` / `--dry-run` | Apply changes or display the plan; default dry-run |
 | `--rollback BACKUP` | Restore an earlier run; requires `--apply` |
 
 These options may also be supplied through the `[convert-labels]` table in
 `config.toml`; repeatable labels use a TOML list such as
-`labels = ["hostname", "os"]`.
+`labels = ["hostname", "os"]`. Backups use `[common].output_dir`, whose
+default is `csw-tools-outputs`; the global `--output-dir` option must precede
+the command.
 
 ## Plan, backup, and rollback
 
@@ -74,7 +75,7 @@ The plan displays each workload IP, its prior static-label map, and its proposed
 map. Workloads with no usable requested values or no resulting change are
 omitted. A dry run makes no API mutations.
 
-`--apply` creates a timestamped JSON backup in `csw-tools-backups/` by default
+`--apply` creates a timestamped JSON backup in `csw-tools-outputs/` by default
 before the first update. It marks each operation attempted and applied around
 the API request so a partially completed run remains recoverable. Keep this file
 until the labels have been validated.
@@ -84,7 +85,7 @@ original run:
 
 ```console
 csw-tools -d my-company convert-labels \
-  --apply --rollback csw-tools-backups/convert-labels-TIMESTAMP.json
+  --apply --rollback csw-tools-outputs/convert-labels-TIMESTAMP.json
 ```
 
 The backup must have been produced by `convert-labels` for the same normalized

@@ -34,6 +34,10 @@ from csw_tools.commands.create_scopes.command import (
 )
 from csw_tools.dashboard import normalize_dashboard
 
+clean_stale_labels_module = import_module(
+    "csw_tools.commands.clean_stale_labels.command"
+)
+convert_labels_module = import_module("csw_tools.commands.convert_labels.command")
 create_scopes_module = import_module("csw_tools.commands.create_scopes.command")
 
 
@@ -48,6 +52,49 @@ def test_new_command_help_documents_safety_controls(command_name: str) -> None:
     assert "--dry-run" in result.output
     assert "--rollback" in result.output
     assert "backup" in result.output.lower()
+
+
+@pytest.mark.parametrize(
+    "command_name",
+    [
+        "clean-stale-labels",
+        "convert-labels",
+        "create-scopes",
+        "prune-agents",
+    ],
+)
+def test_backup_commands_use_global_output_directory_option(
+    command_name: str,
+) -> None:
+    root_help = CliRunner().invoke(cli, ["--help"])
+    command_help = CliRunner().invoke(cli, [command_name, "--help"])
+
+    assert root_help.exit_code == 0
+    assert "--output-dir" in root_help.output
+    assert command_help.exit_code == 0
+    assert "--backup-dir" not in command_help.output
+
+
+@pytest.mark.parametrize(
+    "command_name",
+    [
+        "clean-stale-labels",
+        "convert-labels",
+        "create-scopes",
+        "prune-agents",
+    ],
+)
+def test_legacy_backup_directory_option_has_migration_error(
+    tmp_path: Path, command_name: str
+) -> None:
+    result = CliRunner().invoke(
+        cli,
+        [command_name, "--backup-dir", str(tmp_path)],
+    )
+
+    assert result.exit_code == 2
+    assert "--backup-dir has moved to the global --output-dir" in result.output
+    assert f"csw-tools --output-dir PATH {command_name}" in result.output
 
 
 def test_create_scopes_help_documents_csv_syntax() -> None:
@@ -94,6 +141,14 @@ class ConvertApi:
         return {"environment": "prod"} if ip.endswith("1") else None
 
 
+class ApplyingConvertApi(ConvertApi):
+    def __init__(self) -> None:
+        self.writes: list[tuple[str, dict[str, object]]] = []
+
+    def set_static_label(self, ip: str, labels: dict[str, object]) -> None:
+        self.writes.append((ip, labels))
+
+
 def test_convert_plan_preserves_existing_labels() -> None:
     operations = plan_changes(
         ConvertApi(), [("hostname", "asset_name")], scope=None, page_size=10
@@ -104,6 +159,33 @@ def test_convert_plan_preserves_existing_labels() -> None:
         "asset_name": "web-1",
     }
     assert operations[1]["before"] is None
+
+
+def test_convert_labels_backup_uses_common_output_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = ApplyingConvertApi()
+    output_dir = tmp_path / "common-output"
+    monkeypatch.setattr(convert_labels_module, "api_for", lambda _app: api)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--dashboard",
+            "test",
+            "--output-dir",
+            str(output_dir),
+            "--no-log-cli-output",
+            "convert-labels",
+            "--label",
+            "hostname",
+            "--apply",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert len(api.writes) == 2
+    assert list(output_dir.glob("convert-labels-*.json"))
 
 
 class CleanupApi:
@@ -135,6 +217,28 @@ class CleanupApi:
         ]
 
 
+class ApplyingCleanupApi:
+    def __init__(self) -> None:
+        self.deleted: list[str] = []
+
+    def inventory(self, **_kwargs: object):
+        return iter(())
+
+    def search_static_labels(self, ip_range: str):
+        if ":" in ip_range:
+            return []
+        return [
+            {
+                "key": "192.0.2.10",
+                "updatedAt": 1,
+                "value": {"environment": "old"},
+            }
+        ]
+
+    def delete_static_label(self, ip: str) -> None:
+        self.deleted.append(ip)
+
+
 def test_cleanup_requires_absence_and_minimum_age() -> None:
     now = datetime(2026, 8, 26, tzinfo=UTC)
     operations, missing = plan_cleanup(
@@ -147,6 +251,31 @@ def test_cleanup_requires_absence_and_minimum_age() -> None:
 
     assert [operation["ip"] for operation in operations] == ["10.0.0.2"]
     assert missing == 1
+
+
+def test_clean_stale_labels_backup_uses_common_output_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = ApplyingCleanupApi()
+    output_dir = tmp_path / "common-output"
+    monkeypatch.setattr(clean_stale_labels_module, "api_for", lambda _app: api)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--dashboard",
+            "test",
+            "--output-dir",
+            str(output_dir),
+            "--no-log-cli-output",
+            "clean-stale-labels",
+            "--apply",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert api.deleted == ["192.0.2.10"]
+    assert list(output_dir.glob("clean-stale-labels-*.json"))
 
 
 @pytest.mark.parametrize(
@@ -446,11 +575,11 @@ def test_create_scopes_command_completes_batch_and_reports_summary(
         [
             "--dashboard",
             "test",
+            "--output-dir",
+            str(tmp_path),
             "create-scopes",
             str(csv_file),
             "--apply",
-            "--backup-dir",
-            str(tmp_path),
         ],
     )
 

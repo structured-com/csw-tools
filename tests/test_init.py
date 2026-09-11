@@ -14,6 +14,14 @@ def _example_config_contents() -> bytes:
     return resources.files("csw_tools").joinpath(CONFIG_EXAMPLE_FILENAME).read_bytes()
 
 
+def test_example_config_documents_common_output_defaults() -> None:
+    contents = _example_config_contents().decode("utf-8")
+
+    assert '# output_dir = "csw-tools-outputs"' in contents
+    assert "# log_cli_output = true" in contents
+    assert "backup_dir" not in contents
+
+
 def test_init_creates_default_config_and_parent_directories(tmp_path: Path) -> None:
     config_path = tmp_path / "user-config" / "config.toml"
 
@@ -56,6 +64,24 @@ def test_init_keeps_existing_config_by_default(tmp_path: Path) -> None:
     assert "Overwrite it? [y/N]" in result.output
     assert f"Retained existing configuration: '{config_path}'" in result.output
     assert "Open configuration directory now? [y/N]" in result.output
+
+
+def test_init_uses_valid_existing_common_output_settings(tmp_path: Path) -> None:
+    output_dir = tmp_path / "configured-output"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f'[common]\noutput_dir = "{output_dir}"\nlog_cli_output = true\n',
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["--config", str(config_path), "init"],
+        input="\n\n",
+    )
+
+    assert result.exit_code == 0
+    assert list(output_dir.glob("csw-tools-init-*.log"))
 
 
 def test_init_replaces_existing_config_when_confirmed(tmp_path: Path) -> None:

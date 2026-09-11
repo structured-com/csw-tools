@@ -132,6 +132,14 @@ def test_configure_credentials_collects_pair_before_writing(
     assert "Repeat for confirmation" not in result.output
     assert "Stored CSW API credentials" in result.output
     assert "custom-service" in result.output
+    [output_log] = Path(cli_module.DEFAULT_OUTPUT_DIRECTORY).glob(
+        "csw-tools-configure-credentials-*.log"
+    )
+    transcript = output_log.read_text(encoding="utf-8")
+    assert "actual-key" not in transcript
+    assert "actual-secret" not in transcript
+    assert "CSW API key: 10 characters entered." in transcript
+    assert "CSW API secret: 13 characters entered." in transcript
 
 
 def test_configure_credentials_prompts_once_for_each_hidden_value(

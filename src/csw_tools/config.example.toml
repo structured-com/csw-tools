@@ -1,9 +1,5 @@
 [common]
 
-## Base service name used for passwords stored by csw-tools in the keyring.
-## Modifying this is advanced usage and is typically not needed.
-# keyring_service_name = "csw-tools"
-
 ## Secure Workload (formerly Tetration) dashboard used for API calls.
 ## Accepted formats:
 ##   SaaS name: my-company (expands to include .tetrationcloud.com)
@@ -14,6 +10,17 @@
 ## Verify the dashboard TLS certificate.
 ## Set to false only when certificate verification must be bypassed.
 # dashboard_verify_tls = true
+
+## Directory for backups, journals, reports, and CLI output logs.
+## Relative paths are resolved from the current working directory.
+# output_dir = "csw-tools-outputs"
+
+## Save a combined stdout/stderr transcript for each selected command.
+# log_cli_output = true
+
+## Base service name used for passwords stored by csw-tools in the keyring.
+## Modifying this is advanced usage and is typically not needed.
+# keyring_service_name = "csw-tools"
 
 [clean-stale-labels]
 # minimum_age = 30
@@ -27,7 +34,6 @@
 
 [prune-agents]
 # page_size = 500
-# backup_dir = "csw-tools-backups"
 ## Defaults to dry-run with individual confirmation when --apply is supplied.
 ## Agent deletion is destructive and cannot be rolled back.
 ## lastdate is an optional Unix epoch cutoff in seconds; omitted = 30 days ago.

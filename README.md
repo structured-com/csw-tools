@@ -5,21 +5,20 @@ Tetration), available through a single command-line package.
 
 ## Current utilities
 
-These core utilities set up `csw-tools` for general use:
+**These core utilities set up `csw-tools` for general use:**
 
 | Command | Description | Documentation |
 |---|---|---|
 | `init` | Create or replace the per-user `config.toml` | [Guide](src/csw_tools/commands/init/README.md) |
 | `configure-credentials` | Inspect or replace CSW API credentials in the OS keyring | [Guide](src/csw_tools/commands/configure_credentials/README.md) |
 
-The following command is implemented for production use:
+**The following command is implemented for production use:**
 
 | Command | Description | Documentation |
 |---|---|---|
 | `create-scopes` | Create scopes in bulk from CSV | [Guide](src/csw_tools/commands/create_scopes/README.md) |
 
-The following commands are in DEV/TESTING state and generally should not be
-used in production yet:
+**The following commands are in DEV/TESTING state and generally should not be used in production yet:**
 
 | Command | Description | Documentation |
 |---|---|---|
@@ -58,6 +57,9 @@ csw-tools create-scopes scopes.csv
 csw-tools --dashboard my-company.tetrationcloud.com prune-agents
 csw-tools -d my-company configure-credentials
 ```
+
+Command-generated files use `csw-tools-outputs/` in the current working
+directory and a basic CLI log is enabled by default.
 
 Every command's guide is linked from the tables above. The command help is the
 authoritative option list:
@@ -112,6 +114,23 @@ per-user location:
 
 If needed, use `--config PATH` before the command name to select a different file.
 
+Common output behavior can be reused across every command:
+
+```toml
+[common]
+output_dir = "csw-tools-outputs"
+log_cli_output = true
+```
+
+Relative output paths are resolved from the current working directory. Absolute
+paths and paths beginning with `~` are also accepted. CLI transcript logging is
+enabled by default; disable it for one run with `--no-log-cli-output` before the
+command name. Each transcript combines stdout and stderr in a plain-text file
+named `csw-tools-COMMAND-YYYYMMDDTHHMMSSmmmZ.log`, prints its absolute path to
+stderr in quotes when logging starts, and never records entered prompt values.
+Root help, version output, unknown commands, and errors raised before
+configuration can be resolved do not create transcripts.
+
 ## Credentials
 
 Secrets are stored through the operating system keyring and are never written
@@ -135,8 +154,8 @@ csw-tools -d my-company configure-credentials
 
 Mutating commands default to `--dry-run`; review the complete plan before using
 `--apply`. Supported commands create a timestamped JSON backup before the first
-API mutation and update it around each attempted operation. Keep backups until
-the results have been validated.
+API mutation in the common output directory and update it around each attempted
+operation. Keep backups until the results have been validated.
 
 Rollback support and limitations differ by command. Read the individual command
 guide before applying or recovering changes. Agent decommissioning has no true

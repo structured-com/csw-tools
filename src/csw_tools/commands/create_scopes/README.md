@@ -96,11 +96,12 @@ csw-tools -d my-company create-scopes scopes.csv --apply
 | Option or argument | Meaning |
 |---|---|
 | `CSV_FILE` | Input file; required unless rolling back |
-| `--backup-dir DIRECTORY` | Backup and error-log location; default `csw-tools-backups` |
 | `--apply` / `--dry-run` | Create scopes or validate and preview; default dry-run |
 | `--rollback BACKUP` | Delete scopes created by a prior run; requires `--apply` |
 
-Global options such as `--dashboard` and `--config` must precede the command.
+Backups and focused error reports use `[common].output_dir`, whose default is
+`csw-tools-outputs`. Global options such as `--output-dir`, `--dashboard`, and
+`--config` must precede the command.
 
 ## Batch results and errors
 
@@ -110,10 +111,10 @@ Independent later rows continue processing. A child whose parent failed is
 reported as its own failure because the parent is unavailable.
 
 When rows fail, a uniquely named
-`create-scopes-errors-TIMESTAMP.log` is written in `--backup-dir`. It records
-the input path, failed line, full scope name, and error. The command exits
-nonzero after processing the complete batch so automation can detect partial
-failure.
+`create-scopes-errors-TIMESTAMP.log` is written in the common output directory.
+This focused report is separate from the full CLI transcript and records the
+input path, failed line, full scope name, and error. The command exits nonzero
+after processing the complete batch so automation can detect partial failure.
 
 Every run prints created, failed, and skipped totals. Dry runs also print how
 many scopes would be created. Long fully qualified names retain their
@@ -133,7 +134,7 @@ Rollback deletes only scopes created by that run, in child-first order:
 
 ```console
 csw-tools -d my-company create-scopes \
-  --apply --rollback csw-tools-backups/create-scopes-TIMESTAMP.json
+  --apply --rollback csw-tools-outputs/create-scopes-TIMESTAMP.json
 ```
 
 If CSW created a scope but execution was interrupted before its ID was saved,

@@ -36,12 +36,12 @@ csw-tools -d my-company prune-agents --apply --noconfirm
 | `--noconfirm` | Skip individual prompts but still display the complete plan |
 | `--apply` / `--dry-run` | Apply destructive changes or preview; default dry-run |
 | `--page-size INTEGER` | Agents, inventory, and policies requested per page; default 500 |
-| `--backup-dir DIRECTORY` | Backup/result journal location; default `csw-tools-backups` |
 | `--rollback BACKUP` | Limited recovery of related objects; requires `--apply` |
 
-Global options such as `--dashboard` and `--config` must precede the command.
-`page_size`, `backup_dir`, and other Click option names can be set in the
-`[prune-agents]` configuration table.
+Global options such as `--output-dir`, `--dashboard`, and `--config` must
+precede the command. `page_size` and other command option names can be set in
+the `[prune-agents]` configuration table. Journals use
+`[common].output_dir`, whose default is `csw-tools-outputs`.
 
 ## Staleness
 
@@ -110,8 +110,8 @@ impact acknowledgements are not counted as separate updates.
 ## Backup and failure journal
 
 Before any mutation, `--apply` writes a unique timestamped JSON file in
-`csw-tools-backups/`, or the selected `--backup-dir`. Its printed path is both
-the pre-change backup and operation result/error journal.
+`csw-tools-outputs/`, or the selected common output directory. Its printed path
+is both the pre-change backup and operation result/error journal.
 
 The journal records original objects, planned changes, associations, user
 decisions, per-operation outcomes, and errors. It is updated before and after
@@ -122,7 +122,7 @@ workload and policy data. The command does not retry an uncertain mutation.
 
 ```console
 csw-tools -d my-company prune-agents \
-  --apply --rollback csw-tools-backups/prune-agents-TIMESTAMP.json
+  --apply --rollback csw-tools-outputs/prune-agents-TIMESTAMP.json
 ```
 
 Recovery verifies the command and dashboard, displays a recovery plan, and

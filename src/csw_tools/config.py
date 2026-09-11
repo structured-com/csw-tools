@@ -29,6 +29,8 @@ class CommonConfig:
     keyring_service_name: str | None = None
     dashboard: Dashboard | None = None
     dashboard_verify_tls: bool | None = None
+    output_dir: Path | None = None
+    log_cli_output: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +99,13 @@ def load_config(path: Path | None = None, *, explicit: bool = False) -> AppConfi
     common_values = raw_config.get("common", {})
     unknown_common_keys = sorted(
         set(common_values)
-        - {"dashboard", "dashboard_verify_tls", "keyring_service_name"}
+        - {
+            "dashboard",
+            "dashboard_verify_tls",
+            "keyring_service_name",
+            "log_cli_output",
+            "output_dir",
+        }
     )
     if unknown_common_keys:
         key_list = ", ".join(unknown_common_keys)
@@ -125,6 +133,36 @@ def load_config(path: Path | None = None, *, explicit: bool = False) -> AppConfi
     if dashboard_verify_tls is not None and not isinstance(dashboard_verify_tls, bool):
         raise ConfigError("[common].dashboard_verify_tls must be a boolean")
 
+    output_dir_value = common_values.get("output_dir")
+    output_dir: Path | None = None
+    if output_dir_value is not None:
+        if not isinstance(output_dir_value, str):
+            raise ConfigError("[common].output_dir must be a string")
+        output_dir_value = output_dir_value.strip()
+        if not output_dir_value:
+            raise ConfigError("[common].output_dir cannot be empty")
+        try:
+            output_dir = Path(output_dir_value).expanduser()
+        except RuntimeError as exc:
+            raise ConfigError(
+                f"[common].output_dir cannot be expanded: {output_dir_value}"
+            ) from exc
+
+    log_cli_output = common_values.get("log_cli_output")
+    if log_cli_output is not None and not isinstance(log_cli_output, bool):
+        raise ConfigError("[common].log_cli_output must be a boolean")
+
+    legacy_backup_sections = sorted(
+        section_name
+        for section_name in CONFIG_SECTION_NAMES
+        if section_name != "common" and "backup_dir" in raw_config.get(section_name, {})
+    )
+    if legacy_backup_sections:
+        sections = ", ".join(f"[{name}]" for name in legacy_backup_sections)
+        raise ConfigError(
+            f"backup_dir has moved to [common].output_dir; remove it from {sections}"
+        )
+
     command_defaults = {
         section_name: dict(cast(dict[str, object], raw_config.get(section_name, {})))
         for section_name in CONFIG_SECTION_NAMES
@@ -136,6 +174,8 @@ def load_config(path: Path | None = None, *, explicit: bool = False) -> AppConfi
             keyring_service_name=keyring_service_name,
             dashboard=dashboard,
             dashboard_verify_tls=dashboard_verify_tls,
+            output_dir=output_dir,
+            log_cli_output=log_cli_output,
         ),
         command_defaults=command_defaults,
         source_path=config_path,

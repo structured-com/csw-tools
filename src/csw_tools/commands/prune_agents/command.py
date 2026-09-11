@@ -12,9 +12,9 @@ import click
 from csw_tools import interaction
 from csw_tools.change_control import backup_path, load_backup, new_backup, write_backup
 from csw_tools.commands.common import (
-    DEFAULT_BACKUP_DIRECTORY,
     api_for,
     command_error,
+    legacy_backup_dir_option,
     require_apply_for_rollback,
 )
 from csw_tools.commands.prune_agents.api import PruneApi
@@ -83,18 +83,12 @@ def prune_interactive(function):
     help="Number of agents/inventory/policies requested per API page.",
 )
 @click.option(
-    "--backup-dir",
-    type=click.Path(path_type=Path, file_okay=False),
-    default=DEFAULT_BACKUP_DIRECTORY,
-    show_default=True,
-    help="Directory for pre-change backups and per-operation result journals.",
-)
-@click.option(
     "--rollback",
     type=click.Path(path_type=Path, dir_okay=False, exists=True),
     help="Limited recovery of related objects from BACKUP; requires --apply. "
     "Cannot restore decommissioned agents. Never retries uncertain writes.",
 )
+@legacy_backup_dir_option
 @pass_app_context
 @prune_interactive
 @dashboard_command
@@ -104,7 +98,6 @@ def command(
     noconfirm: bool,
     apply: bool,
     page_size: int,
-    backup_dir: Path,
     rollback: Path | None,
 ) -> None:
     """(DEV/TESTING) Review and destructively prune stale agents and explicit
@@ -202,7 +195,7 @@ def command(
                 dashboard=app.dashboard,
                 operations=[],
             )
-            path = backup_path(backup_dir, COMMAND_NAME + "-recovery")
+            path = backup_path(app.output_dir, COMMAND_NAME + "-recovery")
             write_backup(path, journal)
             app.console.print(f"Recovery journal: {path}", markup=False)
             counts = recover(api, source, rollback, journal, path, confirm, report)
@@ -261,7 +254,7 @@ def command(
             cutoff=cutoff,
             review_notices=planned["skipped"],
         )
-        path = backup_path(backup_dir, COMMAND_NAME)
+        path = backup_path(app.output_dir, COMMAND_NAME)
         write_backup(path, backup)
         app.console.print(f"Backup and result/error journal: {path}", markup=False)
         counts = apply_plan(api, backup, path, confirm, report)

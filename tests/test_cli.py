@@ -21,6 +21,9 @@ def test_help_lists_all_commands_and_global_options() -> None:
     assert "-d, --dashboard" in result.output
     assert "--dashboard-verify-tls" in result.output
     assert "--no-dashboard-verify-tls" in result.output
+    assert "--output-dir" in result.output
+    assert "--log-cli-output" in result.output
+    assert "--no-log-cli-output" in result.output
     assert "--no-input" not in result.output
     for command_name in (
         "configure-credentials",
@@ -184,11 +187,11 @@ def test_command_configuration_becomes_click_defaults(
     from_backend = runner.invoke(cli, ["prune-policy"])
 
     assert from_config.exit_code == 0
-    assert from_config.output.strip() == "from-config"
+    assert from_config.stdout.strip() == "from-config"
     assert from_cli.exit_code == 0
-    assert from_cli.output.strip() == "from-cli"
+    assert from_cli.stdout.strip() == "from-cli"
     assert from_backend.exit_code == 0
-    assert from_backend.output.strip() == "from-backend"
+    assert from_backend.stdout.strip() == "from-backend"
 
 
 @pytest.mark.parametrize(
@@ -260,6 +263,23 @@ def test_dashboard_panel_safely_renders_ipv6_origin() -> None:
     assert "URL: https://[2001:db8::1]" in result.output
 
 
+def test_dashboard_panel_has_blank_line_before_and_after() -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["--dashboard", "my-company", "prune-policy"],
+    )
+
+    lines = result.output.splitlines()
+    top = next(index for index, line in enumerate(lines) if "CSW Dashboard" in line)
+    bottom = next(
+        index
+        for index, line in enumerate(lines[top + 1 :], start=top + 1)
+        if line.startswith("╰")
+    )
+    assert lines[top - 1] == ""
+    assert lines[bottom + 1] == ""
+
+
 def test_cli_dashboard_overrides_config_dashboard(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
@@ -321,7 +341,53 @@ def test_dashboard_verify_tls_precedence(
     result = CliRunner().invoke(cli, arguments)
 
     assert result.exit_code == 0
-    assert result.output.strip() == str(expected)
+    assert result.stdout.strip() == str(expected)
+
+
+@pytest.mark.parametrize(
+    ("use_config", "use_cli", "expected_source"),
+    [
+        (False, False, "backend"),
+        (True, False, "config"),
+        (True, True, "cli"),
+    ],
+)
+def test_output_directory_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    use_config: bool,
+    use_cli: bool,
+    expected_source: str,
+) -> None:
+    @click.command("prune-policy")
+    @pass_app_context
+    def probe_command(app: AppContext) -> None:
+        click.echo(str(app.output_dir))
+
+    monkeypatch.setitem(cli.commands, "prune-policy", probe_command)
+    config_output = tmp_path / "from-config"
+    cli_output = tmp_path / "from-cli"
+    arguments: list[str] = ["--no-log-cli-output"]
+    if use_config:
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            f'[common]\noutput_dir = "{config_output}"\n',
+            encoding="utf-8",
+        )
+        arguments.extend(("--config", str(config_path)))
+    if use_cli:
+        arguments.extend(("--output-dir", str(cli_output)))
+    arguments.append("prune-policy")
+
+    result = CliRunner().invoke(cli, arguments)
+
+    expected = {
+        "backend": Path(cli_module.DEFAULT_OUTPUT_DIRECTORY).resolve(),
+        "config": config_output.resolve(),
+        "cli": cli_output.resolve(),
+    }[expected_source]
+    assert result.exit_code == 0
+    assert result.stdout.strip() == str(expected)
 
 
 @pytest.mark.parametrize(

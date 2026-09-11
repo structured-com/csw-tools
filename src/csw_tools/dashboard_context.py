@@ -37,6 +37,7 @@ def dashboard_command[**P, R](
             ("URL: ", "bold"),
             (dashboard.url, "cyan"),
         )
+        app.console.print()
         app.console.print(
             Panel.fit(
                 details,
@@ -45,6 +46,7 @@ def dashboard_command[**P, R](
                 title="CSW Dashboard",
             )
         )
+        app.console.print()
         return function(app, *args, **kwargs)
 
     return cast(Callable[P, R], prepared)

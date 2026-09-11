@@ -10,9 +10,9 @@ from rich.table import Table
 
 from csw_tools.change_control import backup_path, load_backup, new_backup, write_backup
 from csw_tools.commands.common import (
-    DEFAULT_BACKUP_DIRECTORY,
     api_for,
     command_error,
+    legacy_backup_dir_option,
     require_apply_for_rollback,
 )
 from csw_tools.context import AppContext, pass_app_context
@@ -106,13 +106,6 @@ def rollback_changes(api: CswApi, backup: Mapping[str, object]) -> int:
     help="Inventory records requested per API page.",
 )
 @click.option(
-    "--backup-dir",
-    type=click.Path(path_type=Path, file_okay=False),
-    default=DEFAULT_BACKUP_DIRECTORY,
-    show_default=True,
-    help="Directory for automatic JSON backups created before changes.",
-)
-@click.option(
     "--apply/--dry-run",
     default=False,
     show_default=True,
@@ -123,6 +116,7 @@ def rollback_changes(api: CswApi, backup: Mapping[str, object]) -> int:
     type=click.Path(path_type=Path, dir_okay=False, exists=True),
     help="Restore labels from a backup created by this command; requires --apply.",
 )
+@legacy_backup_dir_option
 @pass_app_context
 @interactive_command
 @dashboard_command
@@ -131,7 +125,6 @@ def command(
     labels: tuple[str, ...],
     scope: str | None,
     page_size: int,
-    backup_dir: Path,
     apply: bool,
     rollback: Path | None,
 ) -> None:
@@ -188,7 +181,7 @@ def command(
         backup = new_backup(
             command=COMMAND_NAME, dashboard=app.dashboard, operations=operations
         )
-        path = backup_path(backup_dir, COMMAND_NAME)
+        path = backup_path(app.output_dir, COMMAND_NAME)
         write_backup(path, backup)
         for operation in operations:
             operation["attempted"] = True

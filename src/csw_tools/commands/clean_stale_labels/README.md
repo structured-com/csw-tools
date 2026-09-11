@@ -53,12 +53,13 @@ csw-tools -d my-company clean-stale-labels \
 | `--minimum-age DAYS` | Required age before deletion; default 30 |
 | `--ip-range CIDR` | Limit static-label discovery; repeat as needed |
 | `--page-size INTEGER` | Current inventory records per API page; default 500 |
-| `--backup-dir DIRECTORY` | Backup location; default `csw-tools-backups` |
 | `--apply` / `--dry-run` | Delete eligible records or preview; default dry-run |
 | `--rollback BACKUP` | Recreate deleted records; requires `--apply` |
 
 `minimum_age` and `page_size` can be set in the `[clean-stale-labels]`
-`config.toml` table. Global options must precede the command.
+`config.toml` table. Backups use `[common].output_dir`, whose default is
+`csw-tools-outputs`. Global options such as `--output-dir` must precede the
+command.
 
 ## Plan, backup, and rollback
 
@@ -72,7 +73,7 @@ recreates the deleted records from those saved attributes:
 
 ```console
 csw-tools -d my-company clean-stale-labels \
-  --apply --rollback csw-tools-backups/clean-stale-labels-TIMESTAMP.json
+  --apply --rollback csw-tools-outputs/clean-stale-labels-TIMESTAMP.json
 ```
 
 The backup must have been produced by this command for the same normalized

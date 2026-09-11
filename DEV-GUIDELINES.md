@@ -45,6 +45,7 @@ backend defaults┘                         │
                                           ├─ resolved settings
 interactive prompt (when still needed) ──┤
 OS keyring (lazy) ────────────────────────┤
+                                          ├─ Common output directory
                                           ├─ Rich stdout console
                                           └─ Rich stderr console
 ```
@@ -66,6 +67,19 @@ messages go to `app.error_console` on stderr. Use Rich tables and panels through
 those shared consoles; do not create new consoles inside a command. Expected
 usage, configuration, backup, or API failures should become `click.UsageError`
 or `click.ClickException` so callers receive a useful message and nonzero exit.
+
+`[common].output_dir` and the global `--output-dir` select one shared location
+for command-owned backups, journals, reports, and logs. Relative paths resolve
+from the current working directory. Commands choose their own filenames and
+formats but use `app.output_dir` instead of defining directory options.
+
+CLI transcript logging is controlled by `[common].log_cli_output` and
+`--log-cli-output/--no-log-cli-output`, and is enabled by default. The root group
+tees application-emitted stdout and stderr to one ANSI-free text file while
+preserving the original terminal streams. It suppresses entered prompt values
+and remains active through Click's final handled-error rendering. Root help,
+eager version output, unknown commands, and configuration failures that occur
+before common settings resolve are intentionally not logged.
 
 ## Click command structure
 
@@ -101,7 +115,9 @@ base keyring service name, normalized dashboard state, TLS verification, and
 the two Rich consoles. It contains a keyring accessor, not plaintext secrets.
 
 `config.py` validates known TOML sections and common value types. Unknown
-sections and common keys fail early rather than being silently ignored.
+sections and common keys fail early rather than being silently ignored. The
+removed command-level `backup_dir` setting fails with a migration message rather
+than being ignored.
 `config_defaults.py` is for true backend defaults and fixed identifiers. Add a
 command name and config section there when its options may be configured.
 
@@ -153,15 +169,17 @@ Mutating commands should default to dry-run and use the helpers in
 `commands/common.py` and `change_control.py`. Create the backup before the first
 mutation, journal attempted and completed operations atomically, verify command
 and dashboard identity during recovery, and stop further mutations if the
-journal cannot be persisted. Define recovery limitations in the command README.
+journal cannot be persisted. Write those artifacts beneath `app.output_dir` and
+define recovery limitations in the command README.
 
 ## Core setup commands
 
 ### `init`
 
-The root CLI intentionally substitutes an empty `AppConfig` for `init`, allowing
-an invalid existing file to be replaced. The command receives the resolved
-target through `AppContext.config_path`, reads the packaged example with
+The root CLI uses valid existing common output settings for `init`, but falls
+back to CLI/backend defaults when the existing configuration is missing or
+invalid so it can still be replaced. The command receives the resolved target
+through `AppContext.config_path`, reads the packaged example with
 `importlib.resources`, writes beside the target, and atomically replaces it only
 after confirmation. After any successful create, replace, or retain path, it
 offers to open the containing directory through the native desktop launcher.
