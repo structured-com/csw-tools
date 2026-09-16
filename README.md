@@ -3,30 +3,19 @@
 A collection of automation utilities for Cisco Secure Workload (CSW, formerly
 Tetration), available through a single command-line package.
 
-## Current utilities
 
-**These core utilities set up `csw-tools` for general use:**
+## Available Commands
 
-| Command | Description | Documentation |
-|---|---|---|
-| `init` | Create or replace the per-user `config.toml` | [Guide](src/csw_tools/commands/init/README.md) |
-| `configure-credentials` | Inspect or replace CSW API credentials in the OS keyring | [Guide](src/csw_tools/commands/configure_credentials/README.md) |
-
-**The following command is implemented for production use:**
-
-| Command | Description | Documentation |
-|---|---|---|
-| `create-scopes` | Create scopes in bulk from CSV | [Guide](src/csw_tools/commands/create_scopes/README.md) |
-
-**The following commands are in DEV/TESTING state and generally should not be used in production yet:**
-
-| Command | Description | Documentation |
-|---|---|---|
-| `clean-stale-labels` | Remove old static labels for workloads absent from current inventory | [Guide](src/csw_tools/commands/clean_stale_labels/README.md) |
-| `convert-labels` | Persist observed inventory fields as per-workload static labels | [Guide](src/csw_tools/commands/convert_labels/README.md) |
-| `prune-agents` | Preview and destructively decommission stale agents and clean explicit related objects | [Guide](src/csw_tools/commands/prune_agents/README.md) |
-| `prune-policy` | Not implemented: remove or filter entries within a workspace policy | [Guide](src/csw_tools/commands/prune_policy/README.md) |
-| `sync-collection-rules` | Not implemented: validate collection rules against scope and filter IPs | [Guide](src/csw_tools/commands/sync_collection_rules/README.md) |
+| Command | Status | What it does | Docs |
+|---|---|---|---|
+| `init` | Core | Create or replace the user's `config.toml`. | [Guide](src/csw_tools/commands/init/README.md) |
+| `configure-credentials` | Core | Set user CSW API credentials in the OS keyring | [Guide](src/csw_tools/commands/configure_credentials/README.md) |
+| `create-scopes` | Production | Create scopes in bulk from .CSV | [Guide](src/csw_tools/commands/create_scopes/README.md) |
+| `clean-stale-labels` | DEV/TESTING | Remove static labels for workloads absent from inventory | [Guide](src/csw_tools/commands/clean_stale_labels/README.md) |
+| `convert-labels` | DEV/TESTING | Persist dynamic labels as static labels | [Guide](src/csw_tools/commands/convert_labels/README.md) |
+| `prune-agents` | DEV/TESTING | Preview and decommission stale agents and related objects | [Guide](src/csw_tools/commands/prune_agents/README.md) |
+| `prune-policy` | DEV/TESTING | Remove or filter entries within a workspace policy | [Guide](src/csw_tools/commands/prune_policy/README.md) |
+| `sync-collection-rules` | DEV/TESTING | Validate collection rules against scope and filter IPs | [Guide](src/csw_tools/commands/sync_collection_rules/README.md) |
 
 ## Installation
 
