@@ -103,35 +103,18 @@ per-user location:
 
 If needed, use `--config PATH` before the command name to select a different file.
 
-Common output behavior can be reused across every command:
 
-```toml
-[common]
-output_dir = "csw-tools-outputs"
-log_cli_output = true
-```
-
-Relative output paths are resolved from the current working directory. Absolute
-paths and paths beginning with `~` are also accepted. CLI transcript logging is
-enabled by default; disable it for one run with `--no-log-cli-output` before the
-command name. Each transcript combines stdout and stderr in a plain-text file
-named `csw-tools-COMMAND-YYYYMMDDTHHMMSSmmmZ.log`, prints its absolute path to
-stderr in quotes when logging starts, and never records entered prompt values.
-Root help, version output, unknown commands, and errors raised before
-configuration can be resolved do not create transcripts.
 
 ## Credentials
 
-Secrets are stored through the operating system keyring and are never written
-to `config.toml` or a backup. For a dashboard named `my-company`, the default
-identifiers are:
+Secrets are stored through the operating system keyring. For a dashboard named `my-company`, the default identifiers are:
 
 | Service name | Username | Stored value |
 |---|---|---|
 | `csw-tools:my-company` | `csw:api_key` | CSW API key |
 | `csw-tools:my-company` | `csw:api_secret` | CSW API secret |
 
-Inspect or replace the credential pair interactively:
+Inspect/replace the credential pair with:
 
 ```console
 csw-tools -d my-company configure-credentials
@@ -141,14 +124,13 @@ csw-tools -d my-company configure-credentials
 
 ## Safe Change Workflow
 
-Mutating commands default to `--dry-run`; review the complete plan before using
+Most edit/write commands default to `--dry-run`; review the complete plan before using
 `--apply`. Supported commands create a timestamped JSON backup before the first
-API mutation in the common output directory and update it around each attempted
-operation. Keep backups until the results have been validated.
+API change in the common output directory and update it around each attempted
+operation. 
 
 Rollback support and limitations differ by command. Read the individual command
-guide before applying or recovering changes. Agent decommissioning has no true
-rollback.
+guide before applying or recovering changes. 
 
 ## Development
 
