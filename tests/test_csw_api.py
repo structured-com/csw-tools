@@ -183,3 +183,71 @@ def test_inventory_follows_opaque_offsets() -> None:
 
     assert results == [{"ip": "10.0.0.1"}, {"ip": "10.0.0.2"}]
     assert bodies[1]["offset"] == {"cursor": 2}
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [(b"IP\n192.0.2.1\n", "IP\n192.0.2.1\n"), ("IP\n", "IP\n"), (b"", ""), (None, "")],
+)
+def test_text_request_preserves_csv_and_uses_checked_transport(content, expected):
+    calls = []
+
+    class Client:
+        def get(self, path, **kwargs):
+            calls.append((path, kwargs))
+            return SimpleNamespace(status_code=200, content=content)
+
+    result = CswApi(Client()).request_text("get", "/csv", params={"scope": "Test"})
+    assert result == expected
+    assert calls == [("/csv", {"params": {"scope": "Test"}})]
+
+
+@pytest.mark.parametrize(
+    ("status", "content", "error"),
+    [
+        (403, b"private-body", "403"),
+        (200, b"\xff", "invalid UTF-8"),
+        (200, {"body": "private-body"}, "unexpected text payload"),
+    ],
+)
+def test_text_request_rejects_errors_without_exposing_body(status, content, error):
+    class Client:
+        def get(self, _path):
+            return SimpleNamespace(status_code=status, content=content)
+
+    with pytest.raises(CswRequestError, match=error) as exc:
+        CswApi(Client()).request_text("get", "/csv")
+    assert "private-body" not in str(exc.value)
+
+
+@pytest.mark.parametrize("response_format", ["request", "request_text"])
+def test_request_network_error_does_not_expose_exception(response_format):
+    class Client:
+        def get(self, _path):
+            raise RuntimeError("private-error")
+
+    with pytest.raises(CswRequestError, match="GET /csv failed") as exc:
+        getattr(CswApi(Client()), response_format)("get", "/csv")
+    assert "private-error" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [(b"", None), (None, None), (b'{"id": 1}', {"id": 1}), ("[1]", [1])],
+)
+def test_json_request_behavior_is_preserved(content, expected):
+    class Client:
+        def get(self, _path):
+            return SimpleNamespace(status_code=200, content=content)
+
+    assert CswApi(Client()).request("get", "/json") == expected
+
+
+@pytest.mark.parametrize("content", [b"IP\n10.0.0.1\n", b"\xff", {"invalid": 1}])
+def test_json_request_still_rejects_invalid_json(content):
+    class Client:
+        def get(self, _path):
+            return SimpleNamespace(status_code=200, content=content)
+
+    with pytest.raises(CswRequestError, match="invalid JSON"):
+        CswApi(Client()).request("get", "/json")

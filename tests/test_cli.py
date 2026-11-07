@@ -47,7 +47,7 @@ def test_command_descriptions_wrap_without_truncation(
     # after hyphens on narrow terminals. The Usage line's [ARGS]... is valid.
     output = "".join(result.output.split("Commands:", 1)[1].split())
     assert "InspectandreplacetheCSWAPIcredentialpair." in output
-    assert "Runthesync-collection-rulesutility(notimplementedyet)." in output
+    assert "Checkmanual-labelCollectionRulescompliance." in output
     assert "..." not in output
 
 
@@ -102,7 +102,7 @@ def test_version_exits_before_loading_configuration(
 
 @pytest.mark.parametrize(
     "command_name",
-    ["prune-policy", "sync-collection-rules"],
+    ["prune-policy"],
 )
 def test_placeholder_commands_report_pending_and_fail(command_name: str) -> None:
     result = CliRunner().invoke(cli, ["--dashboard", "my-company", command_name])

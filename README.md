@@ -15,7 +15,7 @@ Tetration), available through a single command-line package.
 | `convert-labels` | DEV/TESTING | Persist dynamic labels as static labels | [Guide](src/csw_tools/commands/convert_labels/README.md) |
 | `prune-agents` | DEV/TESTING | Preview and decommission stale agents and related objects | [Guide](src/csw_tools/commands/prune_agents/README.md) |
 | `prune-policy` | DEV/TESTING | Remove or filter entries within a workspace policy | [Guide](src/csw_tools/commands/prune_policy/README.md) |
-| `sync-collection-rules` | DEV/TESTING | Validate collection rules against scope and filter IPs | [Guide](src/csw_tools/commands/sync_collection_rules/README.md) |
+| `sync-collection-rules` | DEV/TESTING | Report manual-label IP/subnet compliance with Collection Rules INCLUDE coverage | [Guide](src/csw_tools/commands/sync_collection_rules/README.md) |
 
 ## Installation
 

@@ -43,3 +43,8 @@
 
 
 [sync-collection-rules]
+## Phase 1 reports compliance only. Setting apply = true is rejected.
+apply = false
+## Names default independently to the dashboard name (hostname/IP for on-premises).
+# root_app_scope_name = "my-company"
+# vrf_name = "my-company"
