@@ -43,7 +43,8 @@
 
 
 [sync-collection-rules]
-## Phase 1 reports compliance only. Setting apply = true is rejected.
+## Defaults to dry-run. Apply prepends INCLUDE additions and saves payload history.
+## Apply requires EXCLUDE 0.0.0.0/0 and EXCLUDE ::/0 as the original last two rules.
 apply = false
 ## Names default independently to the dashboard name (hostname/IP for on-premises).
 # root_app_scope_name = "my-company"

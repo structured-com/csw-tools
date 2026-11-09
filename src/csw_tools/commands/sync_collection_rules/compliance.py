@@ -7,7 +7,9 @@ import io
 from bisect import bisect_right
 from collections.abc import Iterable
 from dataclasses import dataclass
-from ipaddress import IPv4Network, IPv6Network, collapse_addresses, ip_network
+from heapq import heappop, heappush
+from ipaddress import IPv4Network, IPv6Network, ip_network
+from itertools import pairwise
 
 IPNetwork = IPv4Network | IPv6Network
 
@@ -28,6 +30,12 @@ class LabelEntry:
 class Finding:
     entry: LabelEntry
     issue: str
+
+
+@dataclass(frozen=True)
+class CollectionRule:
+    network: IPNetwork
+    action: str
 
 
 def parse_network(value: object, source: str) -> IPNetwork:
@@ -68,12 +76,12 @@ def parse_labels_csv(text: str) -> list[LabelEntry]:
     return [LabelEntry(network, tuple(rows)) for network, rows in entries.items()]
 
 
-def parse_include_networks(payload: object) -> list[IPNetwork]:
-    """Check the complete response; only INCLUDE rules contribute coverage."""
+def parse_collection_rules(payload: object) -> list[CollectionRule]:
+    """Validate all rules without changing the original payload."""
 
     if not isinstance(payload, list):
         raise ValueError("Collection Rules response must be a list of rule objects")
-    includes: list[IPNetwork] = []
+    rules: list[CollectionRule] = []
     for index, rule in enumerate(payload, start=1):
         source = f"Collection Rule {index}"
         if not isinstance(rule, dict):
@@ -81,26 +89,71 @@ def parse_include_networks(payload: object) -> list[IPNetwork]:
         if rule.get("action") not in ("INCLUDE", "EXCLUDE"):
             raise ValueError(f"{source}: action must be INCLUDE or EXCLUDE")
         network = parse_network(rule.get("subnet"), source)
-        if rule["action"] == "INCLUDE":
-            includes.append(network)
-    return includes
+        rules.append(CollectionRule(network, rule["action"]))
+    return rules
+
+
+def require_final_catch_alls(rules: list[CollectionRule]) -> None:
+    """Reject unsafe original ordering rather than moving existing rules."""
+
+    expected = {
+        CollectionRule(ip_network("0.0.0.0/0"), "EXCLUDE"),
+        CollectionRule(ip_network("::/0"), "EXCLUDE"),
+    }
+    if len(rules) < 2 or set(rules[-2:]) != expected:
+        raise ValueError(
+            "The original Collection Rules must end with EXCLUDE 0.0.0.0/0 and "
+            "EXCLUDE ::/0 as the last two rules, in either order. "
+            "Correct the rules manually in the CSW GUI before using --apply; "
+            "csw-tools will not move or modify existing rules."
+        )
+
+
+def effective_include_ranges(
+    rules: Iterable[CollectionRule],
+) -> dict[int, list[tuple[int, int]]]:
+    """Sweep rule boundaries, using the earliest active rule at each interval.
+
+    The heap orders by original rule position, not prefix length. Only rule
+    boundaries are visited, even for /0 networks; complexity is O(R log R).
+    """
+
+    boundaries: dict[int, dict[int, list[tuple[int, int, str]]]] = {4: {}, 6: {}}
+    for index, rule in enumerate(rules):
+        network = rule.network
+        first, last = int(network.network_address), int(network.broadcast_address)
+        family = boundaries[network.version]
+        family.setdefault(first, []).append((index, last, rule.action))
+        family.setdefault(last + 1, [])
+
+    included: dict[int, list[tuple[int, int]]] = {4: [], 6: []}
+    for version, family in boundaries.items():
+        active: list[tuple[int, int, str]] = []
+        points = sorted(family)
+        ranges = included[version]
+        for first, stop in pairwise(points):
+            for candidate in family[first]:
+                heappush(active, candidate)
+            while active and active[0][1] < first:
+                heappop(active)
+            if not active or active[0][2] != "INCLUDE":
+                continue
+            if ranges and ranges[-1][1] + 1 == first:
+                ranges[-1] = (ranges[-1][0], stop - 1)
+            else:
+                ranges.append((first, stop - 1))
+    return included
 
 
 def check_compliance(
-    entries: Iterable[LabelEntry], includes: Iterable[IPNetwork]
+    entries: Iterable[LabelEntry], rules: Iterable[CollectionRule]
 ) -> list[Finding]:
-    """Find absent/partial union coverage using merged ranges and binary search."""
+    """Find absent/partial effective INCLUDE coverage using binary search."""
 
-    families: dict[int, list[IPNetwork]] = {4: [], 6: []}
-    for network in includes:
-        families[network.version].append(network)
-    merged = {
-        version: list(collapse_addresses(networks))
-        for version, networks in families.items()
-    }
+    merged = effective_include_ranges(rules)
     starts = {
-        version: [int(network.network_address) for network in networks]
-        for version, networks in merged.items()
+        version: [first for first, _last in ranges]
+        for version, ranges in merged.items()
     }
     findings: list[Finding] = []
     for entry in entries:
@@ -109,7 +162,7 @@ def check_compliance(
         family_starts = starts[network.version]
         first, last = int(network.network_address), int(network.broadcast_address)
         index = bisect_right(family_starts, first) - 1
-        previous_end = int(networks[index].broadcast_address) if index >= 0 else -1
+        previous_end = networks[index][1] if index >= 0 else -1
         if previous_end >= last:
             continue
         overlaps = previous_end >= first or (
@@ -118,3 +171,12 @@ def check_compliance(
         issue = "Partial INCLUDE coverage" if overlaps else "No INCLUDE coverage"
         findings.append(Finding(entry, issue))
     return findings
+
+
+def plan_additions(findings: Iterable[Finding]) -> list[dict[str, object]]:
+    """Add full labeled networks in CSV order without merging or pruning."""
+
+    return [
+        {"subnet": str(finding.entry.network), "action": "INCLUDE"}
+        for finding in findings
+    ]

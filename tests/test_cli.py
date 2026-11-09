@@ -47,7 +47,10 @@ def test_command_descriptions_wrap_without_truncation(
     # after hyphens on narrow terminals. The Usage line's [ARGS]... is valid.
     output = "".join(result.output.split("Commands:", 1)[1].split())
     assert "InspectandreplacetheCSWAPIcredentialpair." in output
-    assert "Checkmanual-labelCollectionRulescompliance." in output
+    assert (
+        "Check(andfix)CollectionRulesagainstdefinedIPsources,suchasuserlabels."
+        in output
+    )
     assert "..." not in output
 
 
@@ -60,12 +63,16 @@ def test_development_commands_are_marked_in_root_help() -> None:
         "convert-labels",
         "prune-agents",
         "prune-policy",
-        "sync-collection-rules",
     ):
         command = cli.commands[command_name]
         assert command.get_short_help_str().startswith("(DEV/TESTING)")
 
-    for command_name in ("configure-credentials", "create-scopes", "init"):
+    for command_name in (
+        "configure-credentials",
+        "create-scopes",
+        "init",
+        "sync-collection-rules",
+    ):
         command = cli.commands[command_name]
         assert not command.get_short_help_str().startswith("(DEV/TESTING)")
 

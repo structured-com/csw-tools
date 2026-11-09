@@ -1,28 +1,46 @@
 import json
+import random
+from copy import deepcopy
 from importlib import import_module
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
 
+from csw_tools.change_control import BackupError
 from csw_tools.cli import cli
 from csw_tools.commands.sync_collection_rules.compliance import (
     check_compliance,
-    parse_include_networks,
+    effective_include_ranges,
+    parse_collection_rules,
     parse_labels_csv,
+    plan_additions,
 )
 from csw_tools.csw_api import CswApi
 
 command_module = import_module("csw_tools.commands.sync_collection_rules.command")
+apply_module = import_module("csw_tools.commands.sync_collection_rules.apply")
 
 
-class ReadOnlyClient:
+def catch_alls():
+    return [
+        {"subnet": "0.0.0.0/0", "action": "EXCLUDE"},
+        {"subnet": "::/0", "action": "EXCLUDE"},
+    ]
+
+
+class CollectionClient:
     def __init__(self):
         self.csv = "IP,Environment\n10.9.9.9,Prod\n192.0.2.10,Test\n"
         self.rules = [{"subnet": "10.0.0.0/8", "action": "INCLUDE"}]
         self.calls = []
         self.status = 200
+        self.post_calls = []
+        self.post_status = 200
+        self.post_content = ...
+        self.post_error = None
+        self.before_post = lambda: None
 
     def get(self, path, **kwargs):
         self.calls.append((path, kwargs))
@@ -34,10 +52,25 @@ class ReadOnlyClient:
             pytest.fail(f"Unexpected API path: {path}")
         return SimpleNamespace(status_code=self.status, content=content)
 
+    def post(self, path, **kwargs):
+        self.before_post()
+        self.post_calls.append((path, kwargs))
+        if self.post_error:
+            raise self.post_error
+        payload = json.loads(kwargs["json_body"])
+        if self.post_status == 200:
+            self.rules = payload
+        content = (
+            json.dumps(payload).encode()
+            if self.post_content is ...
+            else self.post_content
+        )
+        return SimpleNamespace(status_code=self.post_status, content=content)
+
 
 @pytest.fixture
 def client(monkeypatch):
-    client = ReadOnlyClient()
+    client = CollectionClient()
     monkeypatch.setattr(command_module, "api_for", lambda _app: CswApi(client))
     return client
 
@@ -76,7 +109,10 @@ def invoke(*options, dashboard="my-company", globals=()):
 )
 def test_coverage(label, includes, issue):
     findings = check_compliance(
-        parse_labels_csv(f"IP\n{label}\n"), map(ip_network, includes)
+        parse_labels_csv(f"IP\n{label}\n"),
+        parse_collection_rules(
+            [{"subnet": subnet, "action": "INCLUDE"} for subnet in includes]
+        ),
     )
     assert [finding.issue for finding in findings] == ([] if issue is None else [issue])
 
@@ -120,16 +156,16 @@ def test_bad_label_csv(text, error):
         parse_labels_csv(text)
 
 
-def test_rules_only_includes_contribute_and_order_is_ignored():
-    includes = parse_include_networks(
+def test_first_matching_exclude_blocks_later_include():
+    rules = parse_collection_rules(
         [
             {"subnet": "0.0.0.0/0", "action": "EXCLUDE"},
             {"subnet": "10.9.9.9/8", "action": "INCLUDE"},
             {"subnet": "::/0", "action": "EXCLUDE"},
         ]
     )
-    assert includes == [ip_network("10.0.0.0/8")]
-    assert check_compliance(parse_labels_csv("IP\n10.9.9.9\n"), includes) == []
+    findings = check_compliance(parse_labels_csv("IP\n10.9.9.9\n"), rules)
+    assert [finding.issue for finding in findings] == ["No INCLUDE coverage"]
 
 
 @pytest.mark.parametrize(
@@ -149,7 +185,7 @@ def test_rules_only_includes_contribute_and_order_is_ignored():
 )
 def test_bad_rule_responses(rules):
     with pytest.raises(ValueError, match="Collection Rule"):
-        parse_include_networks(rules)
+        parse_collection_rules(rules)
 
 
 def test_cli_reports_only_findings_and_exits_zero(client, tmp_path):
@@ -165,9 +201,10 @@ def test_cli_reports_only_findings_and_exits_zero(client, tmp_path):
     assert "Partial INCLUDE coverage" in result.output
     assert "10.9.9.9" not in result.output
     assert "Checked 3 unique entries | Covered 1 | Need action 2" in result.output
-    assert "EXCLUDE rules and rule precedence are not evaluated" in " ".join(
-        result.output.split()
-    )
+    assert "first matching rule wins" in result.output
+    assert "Apply blocked" in result.output
+    assert "Prepend INCLUDE" in result.output
+    assert "would prepend 2 INCLUDE" in result.output
     assert client.calls == [
         ("/assets/cmdb/download/my-company", {}),
         ("/collection_rules/my-company", {}),
@@ -268,19 +305,20 @@ def test_empty_config_name_rejected(client, tmp_path):
 
 
 @pytest.mark.parametrize("via_config", [False, True])
-def test_apply_is_rejected_before_credentials(monkeypatch, tmp_path, via_config):
-    def unexpected_api(_app):
-        pytest.fail("--apply must not access credentials or APIs")
-
-    monkeypatch.setattr(command_module, "api_for", unexpected_api)
+def test_apply_from_cli_or_config(client, tmp_path, via_config):
+    client.rules += catch_alls()
+    options = ()
+    globals = ("--output-dir", str(tmp_path))
     if via_config:
         config = tmp_path / "config.toml"
         config.write_text("[sync-collection-rules]\napply = true\n")
-        result = invoke(globals=("--config", str(config)))
+        globals += ("--config", str(config))
     else:
-        result = invoke("--apply")
-    assert result.exit_code == 2
-    assert "--apply is not available in phase 1" in result.output
+        options = ("--apply",)
+    result = invoke(*options, globals=globals)
+    assert result.exit_code == 0, result.output
+    assert len(client.post_calls) == 1
+    assert "Applied and verified 1 INCLUDE addition" in result.output
 
 
 def test_rollback_is_not_an_option(client):
@@ -296,20 +334,30 @@ def test_help_contains_description_without_dashboard_or_credentials(help_option)
     assert result.exit_code == 0
     output = " ".join(result.output.split())
     descriptions = [
-        "This module insures that any IP/subnets defined in manual user labels are "
+        "Check (and fix) Collection Rules against defined IP sources, "
+        "such as user labels.",
+        "This module ensures that any IPs/subnets defined in manual user labels are "
         "populated correctly in Collection Rules.",
-        "For flow learnt inventory items, if they are excluded by collection rules, "
-        "inventory item will not exist. Therefore, inventory search and policies may "
-        "not work correctly. This module will help ensure compliance of the "
-        "Collection Rules.",
-        "This is most important when non-RFC1918 IP's (public IP's, tunnel IP's) are "
+        "Flow-learnt inventory items excluded by Collection Rules will not exist in "
+        "inventory. Therefore, inventory search and policies may not work correctly. "
+        "This module helps ensure Collection Rules compliance.",
+        "This is most important when non-RFC1918 IPs (public IPs, tunnel IPs) are "
         "needed for scopes and enforcement policy.",
+        "When applying changes, INCLUDE statements will be added at the beginning of "
+        "the Collection Rules list (no other changes to rules will be made).",
+        "Before applying, the original last two rules must be EXCLUDE 0.0.0.0/0 and "
+        "EXCLUDE ::/0, in either order. This is best practice, so any incorrect rules "
+        "must be manually corrected first.",
+        "The backend API requires both a VRF name (for Collection Rules) and a root "
+        "app scope name (for user labels). These are likely the same as your dashboard "
+        "name, so that will be attempted by default.",
     ]
     for description in descriptions:
         assert description in output
     assert "--apply" in output and "--dry-run" in output
     assert "--rollback" not in output
     assert "--root-app-scope-name" in output and "--vrf-name" in output
+    assert "DEV/TESTING" not in output
     assert "CSW dashboard:" not in output
 
 
@@ -378,3 +426,415 @@ def test_long_ipv6_is_fully_visible_in_narrow_report(client, monkeypatch):
     )
     assert address in first_column
     assert "…" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("label", "ordered", "issue"),
+    [
+        ("10.0.0.0/24", [("10.0.0.0/24", "INCLUDE"), ("10.0.0.0/25", "EXCLUDE")], None),
+        (
+            "10.0.0.0/24",
+            [("10.0.0.0/25", "EXCLUDE"), ("10.0.0.0/24", "INCLUDE")],
+            "Partial INCLUDE coverage",
+        ),
+        (
+            "10.0.0.1",
+            [("10.0.0.0/8", "EXCLUDE"), ("10.0.0.1/32", "INCLUDE")],
+            "No INCLUDE coverage",
+        ),
+        (
+            "10.0.0.0/24",
+            [
+                ("10.0.0.0/26", "INCLUDE"),
+                ("10.0.0.0/25", "EXCLUDE"),
+                ("10.0.0.0/24", "INCLUDE"),
+            ],
+            "Partial INCLUDE coverage",
+        ),
+        (
+            "10.0.0.128/25",
+            [("10.0.0.0/25", "EXCLUDE"), ("10.0.0.0/24", "INCLUDE")],
+            None,
+        ),
+        (
+            "::/0",
+            [("2001:db8::/32", "INCLUDE"), ("::/0", "EXCLUDE")],
+            "Partial INCLUDE coverage",
+        ),
+        (
+            "2001:db8::/64",
+            [("2001:db8::/65", "EXCLUDE"), ("2001:db8::/64", "INCLUDE")],
+            "Partial INCLUDE coverage",
+        ),
+        ("::/0", [("0.0.0.0/0", "EXCLUDE"), ("::/0", "INCLUDE")], None),
+        ("255.255.255.255", [("255.255.255.255/32", "INCLUDE")], None),
+        ("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", [("::/0", "INCLUDE")], None),
+    ],
+)
+def test_effective_ordered_coverage(label, ordered, issue):
+    rules = parse_collection_rules(
+        [{"subnet": subnet, "action": action} for subnet, action in ordered]
+    )
+    findings = check_compliance(parse_labels_csv(f"IP\n{label}\n"), rules)
+    assert [finding.issue for finding in findings] == ([] if issue is None else [issue])
+
+
+def test_interval_sweep_matches_first_match_reference():
+    """Compare overlapping rules with a small independent address-based oracle."""
+
+    generator = random.Random(157)
+    first = int(ip_address("192.0.2.0"))
+    for _ in range(30):
+        payload = [
+            {
+                "subnet": str(
+                    ip_network(
+                        (first + generator.randrange(256), generator.randrange(24, 33)),
+                        strict=False,
+                    )
+                ),
+                "action": generator.choice(["INCLUDE", "EXCLUDE"]),
+            }
+            for _ in range(30)
+        ]
+        rules = parse_collection_rules(payload)
+        ranges = effective_include_ranges(rules)[4]
+        for value in range(first, first + 256):
+            expected = next(
+                (
+                    rule.action == "INCLUDE"
+                    for rule in rules
+                    if ip_address(value) in rule.network
+                ),
+                False,
+            )
+            assert any(start <= value <= end for start, end in ranges) == expected
+
+
+def read_history(directory):
+    (current_path,) = directory.glob("*-current.json")
+    (uploaded_path,) = directory.glob("*-uploaded.json")
+    journal_path = directory / current_path.name.replace("-current.json", ".json")
+    return (
+        json.loads(current_path.read_text()),
+        json.loads(uploaded_path.read_text()),
+        json.loads(journal_path.read_text()),
+    )
+
+
+@pytest.mark.parametrize("reverse_catch_alls", [False, True])
+def test_apply_preserves_payload_and_history_and_is_idempotent(
+    client, tmp_path, reverse_catch_alls
+):
+    client.csv = (
+        "IP\n10.9.9.9/8\n10.0.0.0/8\n10.0.0.1\n"
+        "192.0.2.8/25\n192.0.2.128/25\n2001:0db8::1\n"
+    )
+    client.rules = [
+        {"subnet": "10.0.0.0/8", "action": "EXCLUDE", "note": {"keep": True}},
+        {"subnet": " 10.9.9.9/8 ", "action": "INCLUDE"},
+        {"subnet": "10.0.0.0/8", "action": "INCLUDE"},
+    ] + catch_alls()[:: (-1 if reverse_catch_alls else 1)]
+    original = deepcopy(client.rules)
+    additions = [
+        {"subnet": subnet, "action": "INCLUDE"}
+        for subnet in [
+            "10.0.0.0/8",
+            "10.0.0.1/32",
+            "192.0.2.0/25",
+            "192.0.2.128/25",
+            "2001:db8::1/128",
+        ]
+    ]
+
+    def check_before_post():
+        current, uploaded, journal = read_history(tmp_path)
+        assert current == original
+        assert uploaded == additions + original
+        assert journal["operations"][0]["status"] == "attempted"
+        assert journal["operations"][0]["attempted"] is True
+
+    client.before_post = check_before_post
+    globals = ("--output-dir", str(tmp_path), "--no-log-cli-output")
+    result = invoke("--apply", "--vrf-name", "VRF/Prod?", globals=globals)
+    assert result.exit_code == 0, result.output
+    assert len(client.post_calls) == 1
+    path, kwargs = client.post_calls[0]
+    assert path == "/collection_rules/VRF%2FProd%3F"
+    assert json.loads(kwargs["json_body"]) == additions + original
+    current, uploaded, journal = read_history(tmp_path)
+    assert current == original
+    assert uploaded == additions + original
+    assert journal["command"] == "sync-collection-rules"
+    assert journal["dashboard"] == "my-company"
+    assert journal["format_version"] == 1
+    assert journal["root_app_scope_name"] == "my-company"
+    assert journal["vrf_name"] == "VRF/Prod?"
+    assert journal["operations"][0]["status"] == "verified"
+    assert journal["operations"][0]["added_rules"] == 5
+    base = journal["current_payload"].removesuffix("-current.json")
+    assert journal["uploaded_payload"] == f"{base}-uploaded.json"
+    assert (tmp_path / f"{base}.json").exists()
+    assert "Applied and verified 5" in result.output
+    assert len(list(tmp_path.iterdir())) == 3
+    second = invoke("--apply", "--vrf-name", "VRF/Prod?", globals=globals)
+    assert second.exit_code == 0, second.output
+    assert "No additions needed" in second.output
+    assert len(client.post_calls) == 1
+    assert len(list(tmp_path.iterdir())) == 3
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        [],
+        catch_alls()[:1],
+        catch_alls()[1:],
+        catch_alls() + [{"subnet": "192.0.2.0/24", "action": "INCLUDE"}],
+        [catch_alls()[0], {"subnet": "::/0", "action": "INCLUDE"}],
+        [{"subnet": "0.0.0.0/0", "action": "INCLUDE"}, catch_alls()[1]],
+        [catch_alls()[0], catch_alls()[0]],
+        [catch_alls()[1], catch_alls()[1]],
+    ],
+)
+@pytest.mark.parametrize("csv", ["IP\n", "IP\n10.0.0.1\n", "IP\n192.0.2.1\n"])
+def test_invalid_original_tail_blocks_apply_even_without_additions(
+    client, tmp_path, tail, csv
+):
+    client.csv = csv
+    client.rules += tail
+    globals = ("--output-dir", str(tmp_path), "--no-log-cli-output")
+    result = invoke("--apply", globals=globals)
+    assert result.exit_code == 1
+    assert "Correct the rules manually in the CSW GUI" in result.output
+    assert not client.post_calls
+    assert not list(tmp_path.iterdir())
+    dry_run = invoke("--dry-run", globals=globals)
+    assert dry_run.exit_code == 0, dry_run.output
+    assert "Apply blocked" in dry_run.output
+    assert not client.post_calls
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("csv", ["IP\n", "IP\n10.0.0.1\n"])
+def test_no_op_apply_has_no_post_or_history(client, tmp_path, csv):
+    client.csv = csv
+    client.rules += catch_alls()
+    result = invoke("--apply", globals=("--output-dir", str(tmp_path)))
+    assert result.exit_code == 0, result.output
+    assert not client.post_calls
+    assert not list(tmp_path.glob("*.json"))
+
+
+@pytest.mark.parametrize("stage", ["current", "uploaded", "journal"])
+def test_history_write_failure_prevents_post(client, monkeypatch, tmp_path, stage):
+    client.rules += catch_alls()
+    write = apply_module.write_backup
+
+    def fail_write(path, payload):
+        kind = (
+            "current"
+            if path.stem.endswith("-current")
+            else "uploaded"
+            if path.stem.endswith("-uploaded")
+            else "journal"
+        )
+        if kind == stage:
+            raise BackupError(f"Could not write backup: {path}")
+        write(path, payload)
+
+    monkeypatch.setattr(apply_module, "write_backup", fail_write)
+    result = invoke("--apply", globals=("--output-dir", str(tmp_path)))
+    assert result.exit_code == 1
+    assert "Could not write backup" in result.output
+    assert not client.post_calls
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "http",
+        "transport",
+        "json",
+        "empty",
+        "shape",
+        "rule",
+        "order",
+        "action",
+        "subnet",
+    ],
+)
+def test_post_failures_preserve_history_and_journal_unverified(
+    client, tmp_path, failure
+):
+    client.rules += catch_alls()
+    original = deepcopy(client.rules)
+    uploaded = [{"subnet": "192.0.2.10/32", "action": "INCLUDE"}] + original
+    if failure == "http":
+        client.post_status = 403
+        client.post_content = b"secret response must not appear"
+    elif failure == "transport":
+        client.post_error = RuntimeError("secret transport details must not appear")
+    elif failure == "json":
+        client.post_content = b"secret invalid JSON must not appear"
+    elif failure == "empty":
+        client.post_content = b""
+    elif failure == "shape":
+        client.post_content = b'{"results": []}'
+    elif failure == "rule":
+        client.post_content = b"[{}]"
+    else:
+        changed = deepcopy(uploaded)
+        if failure == "order":
+            changed.reverse()
+        elif failure == "action":
+            changed[0]["action"] = "EXCLUDE"
+        else:
+            changed[0]["subnet"] = "192.0.2.11/32"
+        client.post_content = json.dumps(changed).encode()
+    result = invoke("--apply", globals=("--output-dir", str(tmp_path)))
+    assert result.exit_code == 1, result.output
+    assert len(client.post_calls) == 1
+    assert "POST outcome is unverified" in result.output
+    assert "Applied and verified" not in result.output
+    current, saved_uploaded, journal = read_history(tmp_path)
+    assert current == original
+    assert saved_uploaded == uploaded
+    assert journal["operations"][0]["status"] == "unverified"
+    assert "secret" not in result.output
+    assert "secret" not in json.dumps(journal)
+
+
+@pytest.mark.parametrize("post_fails", [False, True])
+def test_journal_write_failure_after_post_is_not_reported_as_success(
+    client, monkeypatch, tmp_path, post_fails
+):
+    client.rules += catch_alls()
+    if post_fails:
+        client.post_status = 500
+    write = apply_module.write_backup
+
+    def fail_after_post(path, payload):
+        if client.post_calls:
+            raise BackupError(f"Could not write backup: {path}")
+        write(path, payload)
+
+    monkeypatch.setattr(apply_module, "write_backup", fail_after_post)
+    result = invoke("--apply", globals=("--output-dir", str(tmp_path)))
+    assert result.exit_code == 1, result.output
+    assert len(client.post_calls) == 1
+    assert "Could not write backup" in result.output
+    assert "Applied and verified" not in result.output
+    assert "journal still records an attempted POST" in " ".join(result.output.split())
+    assert read_history(tmp_path)[2]["operations"][0]["status"] == "attempted"
+
+
+def test_unwritable_output_directory_prevents_post(client, tmp_path):
+    client.rules += catch_alls()
+    blocker = tmp_path / "file"
+    blocker.write_text("not a directory")
+    result = invoke(
+        "--apply", globals=("--output-dir", str(blocker), "--no-log-cli-output")
+    )
+    assert result.exit_code == 2
+    assert "is a file" in result.output
+    assert not client.post_calls
+
+
+def test_response_allows_equivalent_network_notation(client, tmp_path):
+    client.csv = "IP\n2001:db8::1\n"
+    client.rules = catch_alls()
+    response = [{"subnet": "2001:0db8:0:0:0:0:0:1/128", "action": "INCLUDE"}]
+    client.post_content = json.dumps(response + catch_alls()).encode()
+    result = invoke("--apply", globals=("--output-dir", str(tmp_path)))
+    assert result.exit_code == 0, result.output
+
+
+def test_addition_planning_keeps_full_networks_and_csv_order():
+    entries = parse_labels_csv("IP\n10.0.0.128/25\n10.0.0.9/24\n10.0.0.9/32\n")
+    findings = check_compliance(
+        entries,
+        parse_collection_rules([{"subnet": "10.0.0.0/26", "action": "INCLUDE"}]),
+    )
+    assert plan_additions(findings) == [
+        {"subnet": "10.0.0.128/25", "action": "INCLUDE"},
+        {"subnet": "10.0.0.0/24", "action": "INCLUDE"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "acknowledgement", [{"success": True}, {"success": True, "message": "updated"}]
+)
+def test_apply_accepts_success_acknowledgement(client, tmp_path, acknowledgement):
+    client.rules += catch_alls()
+    original = deepcopy(client.rules)
+    client.post_content = json.dumps(acknowledgement).encode()
+    globals = ("--output-dir", str(tmp_path))
+    result = invoke("--apply", globals=globals)
+    assert result.exit_code == 0, result.output
+    assert "Applied and verified 1 INCLUDE addition" in result.output
+    assert "unverified" not in result.output
+    assert "HTTP diagnostics" not in result.output
+    assert len(client.post_calls) == 1
+    assert len(client.calls) == 2
+    current, uploaded, journal = read_history(tmp_path)
+    assert current == original
+    assert uploaded == [{"subnet": "192.0.2.10/32", "action": "INCLUDE"}] + original
+    assert journal["operations"][0]["status"] == "verified"
+    assert "response_diagnostics" not in journal["operations"][0]
+    second = invoke("--apply", globals=globals)
+    assert second.exit_code == 0, second.output
+    assert "No additions needed" in second.output
+    assert len(client.post_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {"success": False},
+        {"success": "true"},
+        {"success": 1},
+        {"success": 0},
+        {"success": None},
+        {"status": "success"},
+        True,
+        None,
+        1,
+        "success",
+    ],
+)
+def test_apply_rejects_false_missing_or_malformed_success(client, tmp_path, response):
+    client.rules += catch_alls()
+    client.post_content = json.dumps(response).encode()
+    result = invoke("--apply", globals=("--output-dir", str(tmp_path)))
+    assert result.exit_code == 1, result.output
+    assert len(client.post_calls) == 1
+    assert "Applied and verified" not in result.output
+    assert "HTTP diagnostics" not in result.output
+    operation = read_history(tmp_path)[2]["operations"][0]
+    assert operation["status"] == "unverified"
+    assert "response_diagnostics" not in operation
+
+
+@pytest.mark.parametrize("status", [400, 403, 500])
+def test_success_acknowledgement_cannot_override_http_failure(client, tmp_path, status):
+    client.rules += catch_alls()
+    client.post_status = status
+    client.post_content = b'{"success":true}'
+    result = invoke("--apply", globals=("--output-dir", str(tmp_path)))
+    assert result.exit_code == 1, result.output
+    assert f"returned status {status}" in result.output
+    assert "Applied and verified" not in result.output
+    assert len(client.post_calls) == 1
+    assert read_history(tmp_path)[2]["operations"][0]["status"] == "unverified"
+
+
+def test_get_still_requires_ordered_rules_list(client, tmp_path):
+    client.rules = {"success": True}
+    result = invoke(globals=("--output-dir", str(tmp_path)))
+    assert result.exit_code == 1
+    assert "Collection Rules response must be a list of rule objects" in result.output
+    assert "HTTP diagnostics" not in result.output
+    assert not client.post_calls
+    assert not list(tmp_path.glob("*.json"))

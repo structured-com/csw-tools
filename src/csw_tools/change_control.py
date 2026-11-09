@@ -32,8 +32,10 @@ def backup_path(directory: Path, command: str) -> Path:
     return directory.expanduser().resolve() / f"{command}-{timestamp}.json"
 
 
-def write_backup(path: Path, backup: dict[str, object]) -> None:
-    """Atomically write a backup, including incremental operation results."""
+def write_backup(
+    path: Path, backup: dict[str, object] | list[dict[str, object]]
+) -> None:
+    """Atomically write a journal or raw rule-array snapshot."""
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
