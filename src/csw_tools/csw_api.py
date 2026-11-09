@@ -78,7 +78,7 @@ class CswApi:
     def __init__(self, client: RestClient) -> None:
         self.client = client
 
-    def request(
+    def _request_content(
         self,
         method: str,
         path: str,
@@ -86,7 +86,7 @@ class CswApi:
         params: Mapping[str, object] | None = None,
         body: object | None = None,
     ) -> Any:
-        """Issue a request and return decoded JSON, if any."""
+        """Issue a checked request without choosing a response format."""
 
         request_method = getattr(self.client, method.lower())
         kwargs: dict[str, object] = {}
@@ -107,7 +107,45 @@ class CswApi:
                 f"CSW API {method.upper()} {path} returned status {status_text}"
             )
 
-        content = getattr(response, "content", b"")
+        return getattr(response, "content", b"")
+
+    def request_text(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, object] | None = None,
+        body: object | None = None,
+    ) -> str:
+        """Issue a request and return strictly decoded UTF-8 text."""
+
+        content = self._request_content(method, path, params=params, body=body)
+        if content is None:
+            return ""
+        try:
+            if isinstance(content, bytes):
+                return content.decode("utf-8")
+            if isinstance(content, str):
+                return content
+        except UnicodeDecodeError as exc:
+            raise CswRequestError(
+                f"CSW API {method.upper()} {path} returned invalid UTF-8 text"
+            ) from exc
+        raise CswRequestError(
+            f"CSW API {method.upper()} {path} returned an unexpected text payload"
+        )
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, object] | None = None,
+        body: object | None = None,
+    ) -> Any:
+        """Issue a request and return decoded JSON, if any."""
+
+        content = self._request_content(method, path, params=params, body=body)
         if content in (b"", "", None):
             return None
         try:

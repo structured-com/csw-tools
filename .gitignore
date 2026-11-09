@@ -218,6 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # OTHER - CUSTOM
+csw-tools-outputs/
 _scratch/
 audit-git-history.sh
 sensitive-words.txt

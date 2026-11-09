@@ -11,11 +11,12 @@ Tetration), available through a single command-line package.
 | `init` | Core | Create or replace the user's `config.toml`. | [Guide](src/csw_tools/commands/init/README.md) |
 | `configure-credentials` | Core | Set user CSW API credentials in the OS keyring | [Guide](src/csw_tools/commands/configure_credentials/README.md) |
 | `create-scopes` | Production | Create scopes in bulk from .CSV | [Guide](src/csw_tools/commands/create_scopes/README.md) |
+| `sync-collection-rules` | Production | Check (and fix) Collection Rules against defined IP sources, such as user labels | [Guide](src/csw_tools/commands/sync_collection_rules/README.md) |
 | `clean-stale-labels` | DEV/TESTING | Remove static labels for workloads absent from inventory | [Guide](src/csw_tools/commands/clean_stale_labels/README.md) |
 | `convert-labels` | DEV/TESTING | Persist dynamic labels as static labels | [Guide](src/csw_tools/commands/convert_labels/README.md) |
 | `prune-agents` | DEV/TESTING | Preview and decommission stale agents and related objects | [Guide](src/csw_tools/commands/prune_agents/README.md) |
 | `prune-policy` | DEV/TESTING | Remove or filter entries within a workspace policy | [Guide](src/csw_tools/commands/prune_policy/README.md) |
-| `sync-collection-rules` | DEV/TESTING | Validate collection rules against scope and filter IPs | [Guide](src/csw_tools/commands/sync_collection_rules/README.md) |
+
 
 ## Installation
 
